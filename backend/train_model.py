@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 
 from feature_engineering import prepare_features
@@ -9,114 +10,259 @@ from scoring import (
 )
 
 
-file_path = "data/raw/zomato_keywords.csv"
+# =========================================================
+# FOLDER PATHS
+# =========================================================
 
-df = pd.read_csv(
-    file_path,
-    encoding="latin1"
-)
-
-print("Dataset loaded successfully!")
-
-print(
-    "Original Shape:",
-    df.shape
-)
+input_folder = "data/raw"
+output_folder = "data/output"
 
 
-df = prepare_features(df)
+# =========================================================
+# CREATE OUTPUT FOLDER
+# =========================================================
 
-print("Feature engineering completed!")
-
-
-df = calculate_priority_score(df)
-
-print("Priority score calculated!")
+os.makedirs(output_folder, exist_ok=True)
 
 
-df = assign_priority_category(df)
+# =========================================================
+# FIND ALL CSV FILES
+# =========================================================
 
-print("Priority categories assigned!")
-
-
-df = assign_priority_rank(df)
-
-print("Priority ranking completed!")
-
-
-df = df.sort_values(
-    by="Priority_Score",
-    ascending=False
-)
-
-
-columns_to_show = [
-    "Keyword",
-    "Volume",
-    "Position",
-    "Estimated Visits",
-    "CPC",
-    "SEO Difficulty",
-    "Paid Difficulty",
-    "Priority_Score",
-    "Priority_Category",
-    "Priority_Rank"
+files = [
+    file
+    for file in os.listdir(input_folder)
+    if file.lower().endswith(".csv")
 ]
 
 
-print("\nTop 20 Priority Keywords:\n")
+if len(files) == 0:
 
-print(
-    df[columns_to_show]
-    .head(20)
-    .to_string(index=False)
-)
+    print("No CSV files found in:", input_folder)
 
+else:
 
-output_file = "data/output/predictions.csv"
+    print("========================================")
+    print("KEYWORD PRIORITY MODEL")
+    print("========================================")
 
-df.to_csv(
-    output_file,
-    index=False
-)
+    print("Total CSV files found:", len(files))
 
 
-print("\n--------------------------------")
-print("Priority model completed!")
-print("--------------------------------")
+    # =====================================================
+    # PROCESS EACH FILE
+    # =====================================================
 
-print(
-    "Output saved at:",
-    output_file
-)
+    for file_name in files:
 
-
-print("\nPriority Category Distribution:")
-
-print(
-    df["Priority_Category"]
-    .value_counts()
-    .sort_index()
-)
+        print("\n========================================")
+        print("Processing:", file_name)
+        print("========================================")
 
 
-print("\nPriority Score Statistics:")
+        # -------------------------------------------------
+        # INPUT FILE PATH
+        # -------------------------------------------------
 
-print(
-    df["Priority_Score"].describe()
-)
-print("\nPriority Summary:")
+        file_path = os.path.join(
+            input_folder,
+            file_name
+        )
 
-summary = (
-    df.groupby("Priority_Category")
-    .agg(
-        Keyword_Count=("Keyword", "count"),
-        Average_Score=("Priority_Score", "mean"),
-        Average_Volume=("Volume", "mean"),
-        Average_Position=("Position", "mean"),
-        Average_Visits=("Estimated Visits", "mean")
-    )
-    .round(2)
-)
 
-print(summary)
+        # -------------------------------------------------
+        # LOAD DATA
+        # -------------------------------------------------
+
+        try:
+
+            df = pd.read_csv(
+                file_path,
+                encoding="latin1"
+            )
+
+        except Exception as e:
+
+            print("Error loading file:", e)
+
+            continue
+
+
+        print("Dataset loaded successfully!")
+
+        print(
+            "Original Shape:",
+            df.shape
+        )
+
+
+        # -------------------------------------------------
+        # FEATURE ENGINEERING
+        # -------------------------------------------------
+
+        df = prepare_features(df)
+
+        print("Feature engineering completed!")
+
+
+        # -------------------------------------------------
+        # PRIORITY SCORE
+        # -------------------------------------------------
+
+        df = calculate_priority_score(df)
+
+        print("Priority score calculated!")
+
+
+        # -------------------------------------------------
+        # PRIORITY CATEGORY
+        # -------------------------------------------------
+
+        df = assign_priority_category(df)
+
+        print("Priority categories assigned!")
+
+
+        # -------------------------------------------------
+        # PRIORITY RANK
+        # -------------------------------------------------
+
+        df = assign_priority_rank(df)
+
+        print("Priority ranking completed!")
+
+
+        # -------------------------------------------------
+        # SORT BY PRIORITY SCORE
+        # -------------------------------------------------
+
+        df = df.sort_values(
+            by="Priority_Score",
+            ascending=False
+        )
+
+
+        # -------------------------------------------------
+        # OUTPUT FILE NAME
+        # -------------------------------------------------
+
+        file_without_extension = os.path.splitext(
+            file_name
+        )[0]
+
+
+        output_file_name = (
+            file_without_extension
+            + "_predictions.csv"
+        )
+
+
+        output_file = os.path.join(
+            output_folder,
+            output_file_name
+        )
+
+
+        # -------------------------------------------------
+        # SAVE PREDICTION
+        # -------------------------------------------------
+
+        df.to_csv(
+            output_file,
+            index=False
+        )
+
+
+        # -------------------------------------------------
+        # DISPLAY TOP 20
+        # -------------------------------------------------
+
+        columns_to_show = [
+            "Keyword",
+            "Volume",
+            "Position",
+            "Estimated Visits",
+            "CPC",
+            "SEO Difficulty",
+            "Paid Difficulty",
+            "Priority_Score",
+            "Priority_Category",
+            "Priority_Rank"
+        ]
+
+
+        print("\nTop 20 Priority Keywords:\n")
+
+        print(
+            df[columns_to_show]
+            .head(20)
+            .to_string(index=False)
+        )
+
+
+        # -------------------------------------------------
+        # OUTPUT MESSAGE
+        # -------------------------------------------------
+
+        print("\n--------------------------------")
+        print("Priority model completed!")
+        print("--------------------------------")
+
+        print(
+            "Output saved at:",
+            output_file
+        )
+
+
+        # -------------------------------------------------
+        # CATEGORY DISTRIBUTION
+        # -------------------------------------------------
+
+        print("\nPriority Category Distribution:")
+
+        print(
+            df["Priority_Category"]
+            .value_counts()
+            .sort_index()
+        )
+
+
+        # -------------------------------------------------
+        # SCORE STATISTICS
+        # -------------------------------------------------
+
+        print("\nPriority Score Statistics:")
+
+        print(
+            df["Priority_Score"].describe()
+        )
+
+
+        # -------------------------------------------------
+        # PRIORITY SUMMARY
+        # -------------------------------------------------
+
+        print("\nPriority Summary:")
+
+        summary = (
+            df.groupby("Priority_Category")
+            .agg(
+                Keyword_Count=("Keyword", "count"),
+                Average_Score=("Priority_Score", "mean"),
+                Average_Volume=("Volume", "mean"),
+                Average_Position=("Position", "mean"),
+                Average_Visits=("Estimated Visits", "mean")
+            )
+            .round(2)
+        )
+
+        print(summary)
+
+
+    # =====================================================
+    # ALL FILES COMPLETED
+    # =====================================================
+
+    print("\n\n========================================")
+    print("ALL FILES PROCESSED SUCCESSFULLY!")
+    print("========================================")

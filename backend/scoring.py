@@ -61,6 +61,14 @@ def assign_priority_rank(df):
     # Assign Priority Rank
     # ==========================================
 
+    # Handle missing and infinite scores
+    df["Priority_Score"] = (
+        df["Priority_Score"]
+        .replace([float("inf"), float("-inf")], 0)
+        .fillna(0)
+    )
+
+    # Calculate rank
     df["Priority_Rank"] = (
         df["Priority_Score"]
         .rank(

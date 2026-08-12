@@ -1,24 +1,59 @@
 import pandas as pd
 
-file_path = "data/raw/zomato_keywords.csv"
 
-df = pd.read_csv(file_path, encoding="latin1")
+def load_data(file_path):
 
-print("Dataset loaded successfully!")
-print("Shape:", df.shape)
+    print("\n======================================")
+    print("Loading Dataset")
+    print("======================================")
 
-print("\nColumns:")
-print(df.columns.tolist())
+    print("File:", file_path)
 
-print("\nFirst 5 rows:")
-print(df.head())
+    try:
 
-print("\nData Types:")
-print(df.dtypes)
+        df = pd.read_csv(
+            file_path,
+            encoding="latin1"
+        )
 
-print("\nMissing Values:")
-print(df.isnull().sum())
+        print("Dataset loaded successfully!")
+        print("Shape:", df.shape)
 
-print("\nDuplicate Rows:")
-print(df.duplicated().sum())
-print(df.head())
+        print("\nColumns:")
+        print(df.columns.tolist())
+
+        print("\nFirst 5 rows:")
+        print(df.head())
+
+        print("\nData Types:")
+        print(df.dtypes)
+
+        print("\nMissing Values:")
+        print(df.isnull().sum())
+
+        print("\nDuplicate Rows:")
+        print(df.duplicated().sum())
+
+        return df
+
+    except Exception as e:
+
+        print("\nError while loading dataset:")
+        print(e)
+
+        return None
+
+
+def clean_data(df):
+
+    print("\nCleaning data...")
+
+    # Remove duplicate rows
+    df = df.drop_duplicates()
+
+    # Fill missing values
+    df = df.fillna(0)
+
+    print("Data cleaning completed!")
+
+    return df
