@@ -1,10 +1,11 @@
 import pandas as pd
 import os
-from urllib.parse import urlparse
+import re
+from urllib.parse import urlparse, unquote
 
 
 # ============================================================
-# FOLDERS
+# CONFIGURATION
 # ============================================================
 
 RAW_FOLDER = "data/raw"
@@ -21,29 +22,31 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 # ============================================================
-# LOCATION REFERENCE
+# CITY / STATE / COUNTRY REFERENCE
 # ============================================================
 
 LOCATION_DATA = {
 
+    # Maharashtra
     "mumbai": {
         "city": "Mumbai",
         "state": "Maharashtra",
         "country": "India"
     },
 
-    "delhi": {
-        "city": "Delhi",
-        "state": "Delhi",
+    "pune": {
+        "city": "Pune",
+        "state": "Maharashtra",
         "country": "India"
     },
 
-    "new-delhi": {
-        "city": "New Delhi",
-        "state": "Delhi",
+    "nagpur": {
+        "city": "Nagpur",
+        "state": "Maharashtra",
         "country": "India"
     },
 
+    # Karnataka
     "bangalore": {
         "city": "Bangalore",
         "state": "Karnataka",
@@ -56,57 +59,44 @@ LOCATION_DATA = {
         "country": "India"
     },
 
-    "chennai": {
-        "city": "Chennai",
-        "state": "Tamil Nadu",
+    # Delhi / NCR
+    "delhi": {
+        "city": "Delhi",
+        "state": "Delhi",
         "country": "India"
     },
 
-    "kolkata": {
-        "city": "Kolkata",
-        "state": "West Bengal",
+    "new-delhi": {
+        "city": "New Delhi",
+        "state": "Delhi",
         "country": "India"
     },
 
+    # Telangana
     "hyderabad": {
         "city": "Hyderabad",
         "state": "Telangana",
         "country": "India"
     },
 
-    "pune": {
-        "city": "Pune",
-        "state": "Maharashtra",
+    # Tamil Nadu
+    "chennai": {
+        "city": "Chennai",
+        "state": "Tamil Nadu",
         "country": "India"
     },
 
-    "jaipur": {
-        "city": "Jaipur",
-        "state": "Rajasthan",
+    # West Bengal
+    "kolkata": {
+        "city": "Kolkata",
+        "state": "West Bengal",
         "country": "India"
     },
 
+    # Gujarat
     "ahmedabad": {
         "city": "Ahmedabad",
         "state": "Gujarat",
-        "country": "India"
-    },
-
-    "lucknow": {
-        "city": "Lucknow",
-        "state": "Uttar Pradesh",
-        "country": "India"
-    },
-
-    "chandigarh": {
-        "city": "Chandigarh",
-        "state": "Chandigarh",
-        "country": "India"
-    },
-
-    "indore": {
-        "city": "Indore",
-        "state": "Madhya Pradesh",
         "country": "India"
     },
 
@@ -116,9 +106,17 @@ LOCATION_DATA = {
         "country": "India"
     },
 
-    "nagpur": {
-        "city": "Nagpur",
-        "state": "Maharashtra",
+    # Rajasthan
+    "jaipur": {
+        "city": "Jaipur",
+        "state": "Rajasthan",
+        "country": "India"
+    },
+
+    # Uttar Pradesh
+    "lucknow": {
+        "city": "Lucknow",
+        "state": "Uttar Pradesh",
         "country": "India"
     },
 
@@ -134,29 +132,71 @@ LOCATION_DATA = {
         "country": "India"
     },
 
-    "patna": {
-        "city": "Patna",
-        "state": "Bihar",
-        "country": "India"
-    },
-
-    "goa": {
-        "city": "Goa",
-        "state": "Goa",
-        "country": "India"
-    },
-
+    # Kerala
     "kochi": {
         "city": "Kochi",
         "state": "Kerala",
         "country": "India"
     },
 
+    # Madhya Pradesh
+    "indore": {
+        "city": "Indore",
+        "state": "Madhya Pradesh",
+        "country": "India"
+    },
+
+    # Bihar
+    "patna": {
+        "city": "Patna",
+        "state": "Bihar",
+        "country": "India"
+    },
+
+    # Uttarakhand
     "dehradun": {
         "city": "Dehradun",
         "state": "Uttarakhand",
         "country": "India"
+    },
+
+    # Goa
+    "goa": {
+        "city": "Goa",
+        "state": "Goa",
+        "country": "India"
+    },
+
+    # Chandigarh
+    "chandigarh": {
+        "city": "Chandigarh",
+        "state": "Chandigarh",
+        "country": "India"
     }
+}
+
+
+# ============================================================
+# REGION REFERENCE
+# ============================================================
+
+REGION_DATA = {
+
+    "ncr": "NCR",
+
+    "delhi-ncr": "Delhi NCR",
+
+    "national-capital-region": "NCR",
+
+    "north-india": "North India",
+
+    "south-india": "South India",
+
+    "east-india": "East India",
+
+    "west-india": "West India",
+
+    "central-india": "Central India"
 }
 
 
@@ -166,36 +206,43 @@ LOCATION_DATA = {
 
 CATEGORY_DATA = {
 
-    "restaurants": "Restaurant",
-    "restaurant": "Restaurant",
-
     "restaurants-near-me": "Restaurant",
+
     "restaurant-near-me": "Restaurant",
 
-    "cafes": "Cafe",
-    "cafe": "Cafe",
+    "restaurants": "Restaurant",
+
+    "restaurant": "Restaurant",
 
     "cafes-near-me": "Cafe",
 
-    "bars": "Bar",
-    "bar": "Bar",
+    "cafes": "Cafe",
+
+    "cafe": "Cafe",
 
     "bars-near-me": "Bar",
 
-    "bakeries": "Bakery",
-    "bakery": "Bakery",
+    "bars": "Bar",
+
+    "bar": "Bar",
 
     "bakeries-near-me": "Bakery",
+
+    "bakeries": "Bakery",
+
+    "bakery": "Bakery",
+
+    "hotels": "Hotel",
+
+    "hotel": "Hotel",
+
+    "desserts": "Dessert",
+
+    "dessert": "Dessert",
 
     "pizza": "Pizza",
 
     "coffee": "Coffee",
-
-    "hotels": "Hotel",
-    "hotel": "Hotel",
-
-    "desserts": "Dessert",
-    "dessert": "Dessert",
 
     "sweet-shop": "Sweet Shop",
 
@@ -206,15 +253,29 @@ CATEGORY_DATA = {
 
 
 # ============================================================
-# GET URL PARTS
+# URL CLEANING
+# ============================================================
+
+def clean_url(url):
+
+    if pd.isna(url):
+        return ""
+
+    url = str(url).strip()
+
+    if not url:
+        return ""
+
+    return url
+
+
+# ============================================================
+# GET URL PATH PARTS
 # ============================================================
 
 def get_url_parts(url):
 
-    if pd.isna(url):
-        return []
-
-    url = str(url).strip().lower()
+    url = clean_url(url)
 
     if not url:
         return []
@@ -223,20 +284,71 @@ def get_url_parts(url):
 
         parsed_url = urlparse(url)
 
-        path = parsed_url.path.strip("/")
+        path = unquote(parsed_url.path)
+
+        path = path.strip("/")
 
         if not path:
             return []
 
-        return [
-            part
-            for part in path.split("/")
-            if part
-        ]
+        parts = path.split("/")
+
+        cleaned_parts = []
+
+        for part in parts:
+
+            part = part.strip().lower()
+
+            if part:
+                cleaned_parts.append(part)
+
+        return cleaned_parts
 
     except Exception:
 
         return []
+
+
+# ============================================================
+# GET COMPLETE URL PATH
+# ============================================================
+
+def extract_url_path(url):
+
+    url = clean_url(url)
+
+    if not url:
+        return "Unknown"
+
+    try:
+
+        parsed_url = urlparse(url)
+
+        path = unquote(parsed_url.path)
+
+        if not path:
+            return "Unknown"
+
+        return path
+
+    except Exception:
+
+        return "Unknown"
+
+
+# ============================================================
+# NORMALIZE TEXT
+# ============================================================
+
+def normalize_text(text):
+
+    text = str(text).lower()
+
+    text = text.replace("_", "-")
+
+    text = text.strip()
+
+    return text
 
 
 # ============================================================
@@ -248,29 +360,69 @@ def extract_location(url):
     parts = get_url_parts(url)
 
     result = {
+
         "City": "Unknown",
+
         "State": "Unknown",
-        "Country": "Unknown"
+
+        "Country": "Unknown",
+
+        "Region": "Unknown",
+
+        "URL_Location": "Unknown"
     }
 
     if not parts:
+
         return result
 
     # --------------------------------------------------------
-    # Check every URL part for known location
+    # Check Region
     # --------------------------------------------------------
 
     for part in parts:
 
-        if part in LOCATION_DATA:
+        part_normalized = normalize_text(part)
 
-            location = LOCATION_DATA[part]
+        if part_normalized in REGION_DATA:
+
+            result["Region"] = REGION_DATA[
+                part_normalized
+            ]
+
+            result["URL_Location"] = part
+
+    # --------------------------------------------------------
+    # Check City
+    # --------------------------------------------------------
+
+    for part in parts:
+
+        part_normalized = normalize_text(part)
+
+        if part_normalized in LOCATION_DATA:
+
+            location = LOCATION_DATA[
+                part_normalized
+            ]
 
             result["City"] = location["city"]
+
             result["State"] = location["state"]
+
             result["Country"] = location["country"]
 
+            result["URL_Location"] = part
+
             return result
+
+    # --------------------------------------------------------
+    # If Region exists but City doesn't
+    # --------------------------------------------------------
+
+    if result["Region"] != "Unknown":
+
+        result["Country"] = "India"
 
     return result
 
@@ -283,26 +435,56 @@ def extract_category(url):
 
     parts = get_url_parts(url)
 
+    result = {
+
+        "Category": "Unknown",
+
+        "URL_Category": "Unknown"
+    }
+
     if not parts:
-        return "Unknown"
+
+        return result
+
+    # --------------------------------------------------------
+    # First check exact category patterns
+    # --------------------------------------------------------
+
+    for part in parts:
+
+        part_normalized = normalize_text(part)
+
+        if part_normalized in CATEGORY_DATA:
+
+            result["Category"] = CATEGORY_DATA[
+                part_normalized
+            ]
+
+            result["URL_Category"] = part
+
+            return result
+
+    # --------------------------------------------------------
+    # Check complete path
+    # --------------------------------------------------------
 
     full_path = "/".join(parts)
-
-    # --------------------------------------------------------
-    # Exact category matching
-    # --------------------------------------------------------
 
     for pattern, category in CATEGORY_DATA.items():
 
         if pattern in full_path:
 
-            return category
+            result["Category"] = category
 
-    return "Unknown"
+            result["URL_Category"] = pattern
+
+            return result
+
+    return result
 
 
 # ============================================================
-# PROCESS ONE FILE
+# PROCESS ONE CSV FILE
 # ============================================================
 
 def process_file(file_name):
@@ -319,13 +501,24 @@ def process_file(file_name):
     )
 
     # --------------------------------------------------------
-    # LOAD CSV
+    # LOAD DATA
     # --------------------------------------------------------
 
-    df = pd.read_csv(
-        input_path,
-        encoding="latin1"
-    )
+    try:
+
+        df = pd.read_csv(
+            input_path,
+            encoding="latin1"
+        )
+
+    except Exception as error:
+
+        print(
+            "Error loading file:",
+            error
+        )
+
+        return
 
     print(
         "Original Shape:",
@@ -339,40 +532,51 @@ def process_file(file_name):
     if URL_COLUMN not in df.columns:
 
         print(
-            "ERROR: Ranking URL column not found."
+            "\nERROR:"
         )
 
         print(
-            "Available columns:",
+            f"'{URL_COLUMN}' column not found."
+        )
+
+        print(
+            "Available columns:"
+        )
+
+        print(
             df.columns.tolist()
         )
 
         return
 
     # --------------------------------------------------------
-    # EXTRACT LOCATION
+    # LOCATION EXTRACTION
     # --------------------------------------------------------
 
-    location_data = (
+    location_results = (
         df[URL_COLUMN]
         .apply(extract_location)
     )
 
     location_df = pd.DataFrame(
-        location_data.tolist()
+        location_results.tolist()
     )
 
     # --------------------------------------------------------
-    # EXTRACT CATEGORY
+    # CATEGORY EXTRACTION
     # --------------------------------------------------------
 
-    df["Category"] = (
+    category_results = (
         df[URL_COLUMN]
         .apply(extract_category)
     )
 
+    category_df = pd.DataFrame(
+        category_results.tolist()
+    )
+
     # --------------------------------------------------------
-    # ADD LOCATION COLUMNS
+    # ADD NEW COLUMNS
     # --------------------------------------------------------
 
     df["City"] = location_df["City"]
@@ -381,45 +585,101 @@ def process_file(file_name):
 
     df["Country"] = location_df["Country"]
 
+    df["Region"] = location_df["Region"]
+
+    df["URL_Location"] = location_df[
+        "URL_Location"
+    ]
+
+    df["Category"] = category_df[
+        "Category"
+    ]
+
+    df["URL_Category"] = category_df[
+        "URL_Category"
+    ]
+
+    df["URL_Path"] = (
+        df[URL_COLUMN]
+        .apply(extract_url_path)
+    )
+
     # --------------------------------------------------------
-    # REORDER COLUMNS
+    # KEEP ORIGINAL COLUMNS FIRST
     # --------------------------------------------------------
 
     original_columns = [
         column
         for column in df.columns
         if column not in [
+
             "City",
+
             "State",
+
             "Country",
-            "Category"
+
+            "Region",
+
+            "URL_Location",
+
+            "Category",
+
+            "URL_Category",
+
+            "URL_Path"
         ]
+    ]
+
+    new_columns = [
+
+        "City",
+
+        "State",
+
+        "Country",
+
+        "Region",
+
+        "URL_Location",
+
+        "Category",
+
+        "URL_Category",
+
+        "URL_Path"
     ]
 
     df = df[
         original_columns
-        + [
-            "City",
-            "State",
-            "Country",
-            "Category"
-        ]
+        + new_columns
     ]
 
     # --------------------------------------------------------
-    # SHOW SAMPLE
+    # DISPLAY SAMPLE
     # --------------------------------------------------------
 
-    print("\nSample Result:")
+    print("\nSample extracted data:")
 
     print(
+
         df[
             [
                 URL_COLUMN,
+
                 "City",
+
                 "State",
+
                 "Country",
-                "Category"
+
+                "Region",
+
+                "URL_Location",
+
+                "Category",
+
+                "URL_Category"
             ]
         ]
         .head(20)
@@ -427,29 +687,77 @@ def process_file(file_name):
     )
 
     # --------------------------------------------------------
-    # SUMMARY
+    # DISTRIBUTION
     # --------------------------------------------------------
 
     print("\nCity Distribution:")
 
     print(
-        df["City"].value_counts()
+        df["City"]
+        .value_counts()
     )
 
     print("\nState Distribution:")
 
     print(
-        df["State"].value_counts()
+        df["State"]
+        .value_counts()
+    )
+
+    print("\nCountry Distribution:")
+
+    print(
+        df["Country"]
+        .value_counts()
+    )
+
+    print("\nRegion Distribution:")
+
+    print(
+        df["Region"]
+        .value_counts()
     )
 
     print("\nCategory Distribution:")
 
     print(
-        df["Category"].value_counts()
+        df["Category"]
+        .value_counts()
     )
 
     # --------------------------------------------------------
-    # OUTPUT FILE
+    # UNKNOWN COUNTS
+    # --------------------------------------------------------
+
+    print("\nUnknown Counts:")
+
+    print(
+        "Unknown City:",
+        (df["City"] == "Unknown").sum()
+    )
+
+    print(
+        "Unknown State:",
+        (df["State"] == "Unknown").sum()
+    )
+
+    print(
+        "Unknown Country:",
+        (df["Country"] == "Unknown").sum()
+    )
+
+    print(
+        "Unknown Region:",
+        (df["Region"] == "Unknown").sum()
+    )
+
+    print(
+        "Unknown Category:",
+        (df["Category"] == "Unknown").sum()
+    )
+
+    # --------------------------------------------------------
+    # OUTPUT FILE NAME
     # --------------------------------------------------------
 
     base_name = os.path.splitext(
@@ -467,7 +775,7 @@ def process_file(file_name):
     )
 
     # --------------------------------------------------------
-    # SAVE
+    # SAVE OUTPUT
     # --------------------------------------------------------
 
     df.to_csv(
@@ -475,10 +783,9 @@ def process_file(file_name):
         index=False
     )
 
-    print(
-        "\nOutput saved:",
-        output_path
-    )
+    print("\nOutput saved:")
+
+    print(output_path)
 
     print(
         "Final Shape:",
@@ -492,45 +799,73 @@ def process_file(file_name):
 
 def main():
 
-    csv_files = [
-        file
-        for file in os.listdir(RAW_FOLDER)
-        if file.lower().endswith(".csv")
-    ]
-
-    print("=" * 70)
-    print("URL LOCATION & CATEGORY EXTRACTION")
     print("=" * 70)
 
     print(
-        "Total CSV files found:",
+        "URL LOCATION & CATEGORY EXTRACTION SYSTEM"
+    )
+
+    print("=" * 70)
+
+    # --------------------------------------------------------
+    # FIND ALL CSV FILES
+    # --------------------------------------------------------
+
+    csv_files = [
+
+        file
+
+        for file in os.listdir(
+            RAW_FOLDER
+        )
+
+        if file.lower().endswith(".csv")
+    ]
+
+    print(
+        "\nTotal CSV files found:",
         len(csv_files)
     )
 
     if not csv_files:
 
         print(
-            "No CSV files found."
+            "\nNo CSV files found in:"
+        )
+
+        print(
+            RAW_FOLDER
         )
 
         return
 
     # --------------------------------------------------------
-    # PROCESS EACH CSV SEPARATELY
+    # PROCESS EACH FILE SEPARATELY
     # --------------------------------------------------------
 
     for file_name in csv_files:
 
-        process_file(file_name)
+        process_file(
+            file_name
+        )
+
+    # --------------------------------------------------------
+    # COMPLETE
+    # --------------------------------------------------------
 
     print("\n" + "=" * 70)
-    print("ALL FILES COMPLETED")
+
+    print(
+        "ALL CSV FILES PROCESSED SUCCESSFULLY"
+    )
+
     print("=" * 70)
 
 
 # ============================================================
-# START
+# START PROGRAM
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
