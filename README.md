@@ -75,7 +75,7 @@ The primary objectives of this project are:
                     │       Keywords       │
                     └──────────────────────┘
 ```
-# 📁 Project Structur 
+# 📁 Project Structure
 ```text
 Keyword-Priority-Model/
 │
