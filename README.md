@@ -74,8 +74,8 @@ The primary objectives of this project are:
                     │ Predictions & Ranked │
                     │       Keywords       │
                     └──────────────────────┘
-
-📁 Project Structure
+```
+# 📁 Project Structur 
 Keyword-Priority-Model/
 │
 ├── backend/
