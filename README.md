@@ -76,6 +76,7 @@ The primary objectives of this project are:
                     └──────────────────────┘
 ```
 # 📁 Project Structur 
+```text
 Keyword-Priority-Model/
 │
 ├── backend/
@@ -109,3 +110,4 @@ Keyword-Priority-Model/
 │
 ├── .gitignore
 └── README.md
+```
