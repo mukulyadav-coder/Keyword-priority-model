@@ -111,7 +111,9 @@ Keyword-Priority-Model/
 ├── .gitignore
 └── README.md
 ```
-##🚀Setup & Execution
+## 🚀 Setup & Execution
+
+```bash
 git clone https://github.com/mukulyadav-coder/Keyword-priority-model.git
 cd Keyword-Priority-Model
 pip install -r backend/requirements.txt
