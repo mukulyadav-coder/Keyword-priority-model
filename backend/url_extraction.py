@@ -1,29 +1,50 @@
 # ================================================================
-# URL LOCATION & CATEGORY EXTRACTION SYSTEM
+# URL EXTRACTION & CSV ENRICHMENT SYSTEM
 # ================================================================
 #
-# Features:
-#   1. Extract City
-#   2. Extract State / Union Territory
-#   3. Extract Country
-#   4. Extract Region
-#   5. Extract URL Location
-#   6. Extract Category
-#   7. Supports all Indian States and Union Territories
-#   8. Supports multi-word Indian cities
-#   9. Supports Daman & Diu
-#  10. Supports common Indian city aliases
-#  11. Handles Tripadvisor URLs
-#  12. Handles Zomato URLs
-#  13. Handles Markdown-style URLs
-#  14. Handles locked CSV files
+# INPUT:
+#   data/raw/*.csv
+#
+# OUTPUT:
+#   data/processed/*_enriched_new.csv
+#
+# OUTPUT COLUMNS:
+#   No
+#   Keyword
+#   Volume
+#   Position
+#   Estimated Visits
+#   CPC
+#   Paid Difficulty
+#   SEO Difficulty
+#   Ranking URL
+#   City
+#   State
+#   Country
+#   Region
+#   URL_Location
+#   Area
+#   Category
+#   URL_Keyword
+#   Unknown
+#   Remaining_Url_Keywords
+#   Priority Rank
+#
+# RULES:
+#   1. Extract location only when it is present in the URL.
+#   2. If not found, leave the field blank.
+#   3. Category is extracted from the URL.
+#   4. URL_Keyword contains important source-keyword words
+#      that actually occur in the URL.
+#   5. Location/category words are not repeated in URL_Keyword.
+#   6. Remaining_Url_Keywords contains other useful URL words.
+#   7. Priority Rank is always 1.
 #
 # ================================================================
 
 import re
 import html
 from pathlib import Path
-from datetime import datetime
 from urllib.parse import unquote, urlparse
 
 import pandas as pd
@@ -45,7 +66,8 @@ OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 # INDIAN STATES
 # ================================================================
 
-INDIAN_STATES = {
+STATE_MAP = {
+
     "andhra pradesh": "Andhra Pradesh",
     "arunachal pradesh": "Arunachal Pradesh",
     "assam": "Assam",
@@ -75,21 +97,12 @@ INDIAN_STATES = {
     "uttar pradesh": "Uttar Pradesh",
     "uttarakhand": "Uttarakhand",
     "west bengal": "West Bengal",
-}
 
-
-# ================================================================
-# UNION TERRITORIES
-# ================================================================
-
-INDIAN_UTS = {
+    # Union Territories
     "andaman and nicobar islands":
         "Andaman and Nicobar Islands",
 
     "andaman & nicobar islands":
-        "Andaman and Nicobar Islands",
-
-    "andaman nicobar islands":
         "Andaman and Nicobar Islands",
 
     "chandigarh":
@@ -98,37 +111,22 @@ INDIAN_UTS = {
     "dadra and nagar haveli and daman and diu":
         "Dadra and Nagar Haveli and Daman and Diu",
 
-    "dadra nagar haveli daman diu":
-        "Dadra and Nagar Haveli and Daman and Diu",
-
-    "dadra and nagar haveli":
-        "Dadra and Nagar Haveli and Daman and Diu",
-
     "daman and diu":
-        "Dadra and Nagar Haveli and Daman and Diu",
-
-    "daman & diu":
-        "Dadra and Nagar Haveli and Daman and Diu",
-
-    "daman diu":
         "Dadra and Nagar Haveli and Daman and Diu",
 
     "delhi":
         "Delhi",
 
-    "national capital territory of delhi":
+    "nct of delhi":
         "Delhi",
 
-    "nct of delhi":
+    "national capital territory of delhi":
         "Delhi",
 
     "jammu and kashmir":
         "Jammu and Kashmir",
 
     "jammu & kashmir":
-        "Jammu and Kashmir",
-
-    "jammu kashmir":
         "Jammu and Kashmir",
 
     "ladakh":
@@ -146,25 +144,12 @@ INDIAN_UTS = {
 
 
 # ================================================================
-# COMBINED STATE / UT DICTIONARY
-# ================================================================
-
-ALL_INDIAN_STATES = {}
-
-ALL_INDIAN_STATES.update(INDIAN_STATES)
-ALL_INDIAN_STATES.update(INDIAN_UTS)
-
-
-# ================================================================
-# REGION MAPPING
+# REGION MAP
 # ================================================================
 
 REGION_MAP = {
 
-    # ------------------------------------------------------------
-    # NORTH
-    # ------------------------------------------------------------
-
+    # North
     "Delhi": "North",
     "Haryana": "North",
     "Himachal Pradesh": "North",
@@ -175,548 +160,448 @@ REGION_MAP = {
     "Ladakh": "North",
     "Chandigarh": "North",
 
-    # ------------------------------------------------------------
-    # SOUTH
-    # ------------------------------------------------------------
-
+    # South
     "Andhra Pradesh": "South",
     "Karnataka": "South",
     "Kerala": "South",
     "Tamil Nadu": "South",
     "Telangana": "South",
     "Puducherry": "South",
-    "Andaman and Nicobar Islands": "South",
-    "Lakshadweep": "South",
 
-    # ------------------------------------------------------------
-    # WEST
-    # ------------------------------------------------------------
-
+    # West
     "Goa": "West",
     "Gujarat": "West",
     "Maharashtra": "West",
+    "Madhya Pradesh": "West",
     "Dadra and Nagar Haveli and Daman and Diu": "West",
 
-    # ------------------------------------------------------------
-    # EAST
-    # ------------------------------------------------------------
-
+    # East
     "Bihar": "East",
     "Jharkhand": "East",
     "Odisha": "East",
     "West Bengal": "East",
+    "Sikkim": "East",
 
-    # ------------------------------------------------------------
-    # CENTRAL
-    # ------------------------------------------------------------
-
-    "Chhattisgarh": "Central",
-    "Madhya Pradesh": "Central",
-
-    # ------------------------------------------------------------
-    # NORTH EAST
-    # ------------------------------------------------------------
-
+    # North East
     "Arunachal Pradesh": "North East",
     "Assam": "North East",
     "Manipur": "North East",
     "Meghalaya": "North East",
     "Mizoram": "North East",
     "Nagaland": "North East",
-    "Sikkim": "North East",
     "Tripura": "North East",
+
+    # Central
+    "Chhattisgarh": "Central",
 }
 
 
 # ================================================================
-# CITY ALIASES
-# ================================================================
-#
-# IMPORTANT:
-# Longer / multi-word cities are intentionally included.
-# The extraction function checks these BEFORE generic matching.
-#
+# COMMON INDIAN CITIES
 # ================================================================
 
-CITY_ALIASES = {
-
-    # ============================================================
-    # DELHI / NCR
-    # ============================================================
-
-    "new delhi": "New Delhi",
-    "new_delhi": "New Delhi",
-
-    "greater noida": "Greater Noida",
-    "greater_noida": "Greater Noida",
-
-    "navi mumbai": "Navi Mumbai",
-    "navi_mumbai": "Navi Mumbai",
-
-    "gurugram": "Gurugram",
-    "gurgaon": "Gurugram",
-
-    "faridabad": "Faridabad",
-    "ghaziabad": "Ghaziabad",
-    "noida": "Noida",
-
-    # ============================================================
-    # MAHARASHTRA
-    # ============================================================
-
-    "mumbai": "Mumbai",
-    "bombay": "Mumbai",
-
-    "navi mumbai": "Navi Mumbai",
-
-    "thane": "Thane",
-    "kalyan": "Kalyan",
-    "pune": "Pune",
-    "nagpur": "Nagpur",
-    "nashik": "Nashik",
-    "nasik": "Nashik",
-    "aurangabad": "Aurangabad",
-    "chhatrapati sambhajinagar": "Chhatrapati Sambhajinagar",
-    "solapur": "Solapur",
-    "kolhapur": "Kolhapur",
-    "satara": "Satara",
-    "ratnagiri": "Ratnagiri",
-    "alibag": "Alibag",
-    "lonavala": "Lonavala",
-    "mahabaleshwar": "Mahabaleshwar",
-
-    # ============================================================
-    # KARNATAKA
-    # ============================================================
-
-    "bengaluru": "Bengaluru",
-    "bangalore": "Bengaluru",
-
-    "mysuru": "Mysuru",
-    "mysore": "Mysuru",
-
-    "mangalore": "Mangaluru",
-    "mangaluru": "Mangaluru",
-
-    "hubli": "Hubballi",
-    "hubballi": "Hubballi",
-
-    "belgaum": "Belagavi",
-    "belagavi": "Belagavi",
-
-    "coorg": "Coorg",
-    "madikeri": "Madikeri",
-
-    "hampi": "Hampi",
-
-    # ============================================================
-    # TAMIL NADU
-    # ============================================================
-
-    "chennai": "Chennai",
-    "madras": "Chennai",
-
-    "coimbatore": "Coimbatore",
-    "madurai": "Madurai",
-    "salem": "Salem",
-    "tiruchirappalli": "Tiruchirappalli",
-    "trichy": "Tiruchirappalli",
-    "tirunelveli": "Tirunelveli",
-    "thoothukudi": "Thoothukudi",
-    "tuticorin": "Thoothukudi",
-
-    "rameswaram": "Rameswaram",
-    "ooty": "Ooty",
-    "udagamandalam": "Ooty",
-    "kodaikanal": "Kodaikanal",
-    "kanyakumari": "Kanyakumari",
-    "mahabalipuram": "Mahabalipuram",
-    "mamallapuram": "Mahabalipuram",
-
-    "pondicherry": "Puducherry",
-    "puducherry": "Puducherry",
-
-    "thanjavur": "Thanjavur",
-    "tanjore": "Thanjavur",
-
-    "vellore": "Vellore",
-    "erode": "Erode",
-
-    # ============================================================
-    # KERALA
-    # ============================================================
-
-    "kochi": "Kochi",
-    "cochin": "Kochi",
-
-    "thiruvananthapuram": "Thiruvananthapuram",
-    "trivandrum": "Thiruvananthapuram",
-
-    "kozhikode": "Kozhikode",
-    "calicut": "Kozhikode",
-
-    "thrissur": "Thrissur",
-    "trichur": "Thrissur",
-
-    "kollam": "Kollam",
-    "alleppey": "Alappuzha",
-    "alappuzha": "Alappuzha",
-
-    "kottayam": "Kottayam",
-    "munnar": "Munnar",
-    "varkala": "Varkala",
-    "kovalam": "Kovalam",
-    "thekkady": "Thekkady",
-
-    # ============================================================
-    # TELANGANA
-    # ============================================================
-
-    "hyderabad": "Hyderabad",
-    "secunderabad": "Secunderabad",
-    "warangal": "Warangal",
-    "nizamabad": "Nizamabad",
-    "karimnagar": "Karimnagar",
-
-    # ============================================================
-    # ANDHRA PRADESH
-    # ============================================================
-
-    "visakhapatnam": "Visakhapatnam",
-    "vizag": "Visakhapatnam",
-
-    "vijayawada": "Vijayawada",
-    "tirupati": "Tirupati",
-    "guntur": "Guntur",
-    "nellore": "Nellore",
-    "kurnool": "Kurnool",
-    "rajahmundry": "Rajahmundry",
-    "kakinada": "Kakinada",
-    "amaravati": "Amaravati",
-
-    # ============================================================
-    # GUJARAT
-    # ============================================================
-
-    "ahmedabad": "Ahmedabad",
-    "surat": "Surat",
-    "vadodara": "Vadodara",
-    "baroda": "Vadodara",
-
-    "rajkot": "Rajkot",
-    "bhavnagar": "Bhavnagar",
-    "jamnagar": "Jamnagar",
-    "gandhinagar": "Gandhinagar",
-
-    "dwarka": "Dwarka",
-    "somnath": "Somnath",
-    "porbandar": "Porbandar",
-    "bhuj": "Bhuj",
-
-    # ============================================================
-    # RAJASTHAN
-    # ============================================================
-
-    "jaipur": "Jaipur",
-    "jodhpur": "Jodhpur",
-    "udaipur": "Udaipur",
-    "kota": "Kota",
-    "ajmer": "Ajmer",
-    "bikaner": "Bikaner",
-    "pushkar": "Pushkar",
-    "mount abu": "Mount Abu",
-    "mount_abu": "Mount Abu",
-
-    # ============================================================
-    # UTTAR PRADESH
-    # ============================================================
-
-    "lucknow": "Lucknow",
-    "kanpur": "Kanpur",
-    "agra": "Agra",
-    "varanasi": "Varanasi",
-    "allahabad": "Prayagraj",
-    "prayagraj": "Prayagraj",
-    "mathura": "Mathura",
-    "vrindavan": "Vrindavan",
-    "ayodhya": "Ayodhya",
-    "meerut": "Meerut",
-    "bareilly": "Bareilly",
-    "aligarh": "Aligarh",
-    "gorakhpur": "Gorakhpur",
-    "jhansi": "Jhansi",
-    "fatehpur sikri": "Fatehpur Sikri",
-    "fatehpur_sikri": "Fatehpur Sikri",
-
-    # ============================================================
-    # UTTARAKHAND
-    # ============================================================
-
-    "dehradun": "Dehradun",
-    "haridwar": "Haridwar",
-    "rishikesh": "Rishikesh",
-    "mussoorie": "Mussoorie",
-    "nainital": "Nainital",
-    "almora": "Almora",
-    "ranikhet": "Ranikhet",
-    "jim corbett": "Jim Corbett",
-    "jim_corbett": "Jim Corbett",
-
-    # ============================================================
-    # HIMACHAL PRADESH
-    # ============================================================
-
-    "shimla": "Shimla",
-    "manali": "Manali",
-    "dharamshala": "Dharamshala",
-    "dharamsala": "Dharamshala",
-    "mcleod ganj": "McLeod Ganj",
-    "mcleod_ganj": "McLeod Ganj",
-    "kullu": "Kullu",
-    "dalhousie": "Dalhousie",
-    "kasol": "Kasol",
-    "spiti": "Spiti",
-
-    # ============================================================
-    # PUNJAB
-    # ============================================================
-
-    "amritsar": "Amritsar",
-    "ludhiana": "Ludhiana",
-    "jalandhar": "Jalandhar",
-    "patiala": "Patiala",
-    "bathinda": "Bathinda",
-
-    # ============================================================
-    # JAMMU & KASHMIR
-    # ============================================================
-
-    "srinagar": "Srinagar",
-    "jammu": "Jammu",
-    "gulmarg": "Gulmarg",
-    "pahalgam": "Pahalgam",
-    "sonamarg": "Sonamarg",
-    "kashmir": "Kashmir",
-
-    # ============================================================
-    # LADAKH
-    # ============================================================
-
-    "leh": "Leh",
-    "kargil": "Kargil",
-
-    # ============================================================
-    # WEST BENGAL
-    # ============================================================
-
-    "kolkata": "Kolkata",
-    "calcutta": "Kolkata",
-    "darjeeling": "Darjeeling",
-    "siliguri": "Siliguri",
-    "durgapur": "Durgapur",
-    "howrah": "Howrah",
-    "kalimpong": "Kalimpong",
-
-    # ============================================================
-    # ODISHA
-    # ============================================================
-
-    "bhubaneswar": "Bhubaneswar",
-    "cuttack": "Cuttack",
-    "puri": "Puri",
-    "konark": "Konark",
-    "rourkela": "Rourkela",
-
-    # ============================================================
-    # BIHAR
-    # ============================================================
-
-    "patna": "Patna",
-    "gaya": "Gaya",
-    "bodh gaya": "Bodh Gaya",
-    "bodh_gaya": "Bodh Gaya",
-    "muzaffarpur": "Muzaffarpur",
-
-    # ============================================================
-    # JHARKHAND
-    # ============================================================
-
-    "ranchi": "Ranchi",
-    "jamshedpur": "Jamshedpur",
-    "dhanbad": "Dhanbad",
-    "deoghar": "Deoghar",
-
-    # ============================================================
-    # MADHYA PRADESH
-    # ============================================================
-
-    "bhopal": "Bhopal",
-    "indore": "Indore",
-    "gwalior": "Gwalior",
-    "jabalpur": "Jabalpur",
-    "ujjain": "Ujjain",
-    "khajuraho": "Khajuraho",
-    "sanchi": "Sanchi",
-    "mandu": "Mandu",
-
-    # ============================================================
-    # CHHATTISGARH
-    # ============================================================
-
-    "raipur": "Raipur",
-    "bilaspur": "Bilaspur",
-    "durg": "Durg",
-    "bhilai": "Bhilai",
-
-    # ============================================================
-    # ASSAM
-    # ============================================================
-
-    "guwahati": "Guwahati",
-    "dibrugarh": "Dibrugarh",
-    "jorhat": "Jorhat",
-    "silchar": "Silchar",
-    "kaziranga": "Kaziranga",
-
-    # ============================================================
-    # NORTH EAST
-    # ============================================================
-
-    "shillong": "Shillong",
-    "cherrapunji": "Cherrapunji",
-    "gangtok": "Gangtok",
-    "imphal": "Imphal",
-    "aizawl": "Aizawl",
-    "kohima": "Kohima",
-    "agartala": "Agartala",
-    "itanagar": "Itanagar",
-
-    # ============================================================
-    # GOA
-    # ============================================================
-
-    "panaji": "Panaji",
-    "panjim": "Panaji",
-
-    "margao": "Margao",
-    "madgaon": "Margao",
-
-    "vasco da gama": "Vasco da Gama",
-    "vasco_da_gama": "Vasco da Gama",
-
-    "calangute": "Calangute",
-    "baga": "Baga",
-    "anjuna": "Anjuna",
-    "candolim": "Candolim",
-    "palolem": "Palolem",
-
-    # ============================================================
-    # DAMAN / DNH
-    # ============================================================
-
-    "daman": "Daman",
-    "diu": "Diu",
-    "silvassa": "Silvassa",
-
-    # ============================================================
-    # OTHER UT
-    # ============================================================
-
-    "port blair": "Port Blair",
-    "port_blair": "Port Blair",
-
-    "kavaratti": "Kavaratti",
-
-    # ============================================================
-    # COMMON TOURIST LOCATIONS
-    # ============================================================
-
-    "rameswaram": "Rameswaram",
-    "munnar": "Munnar",
-    "ooty": "Ooty",
-    "manali": "Manali",
-    "munnar": "Munnar",
-    "darjeeling": "Darjeeling",
-    "puri": "Puri",
-    "varanasi": "Varanasi",
-    "pushkar": "Pushkar",
-    "rishikesh": "Rishikesh",
-    "haridwar": "Haridwar",
+CITY_MAP = {
+
+    # Delhi
+    "new delhi": ("New Delhi", "Delhi"),
+    "delhi": ("Delhi", "Delhi"),
+
+    # Maharashtra
+    "mumbai": ("Mumbai", "Maharashtra"),
+    "bombay": ("Mumbai", "Maharashtra"),
+    "pune": ("Pune", "Maharashtra"),
+    "nagpur": ("Nagpur", "Maharashtra"),
+    "nashik": ("Nashik", "Maharashtra"),
+    "nasik": ("Nashik", "Maharashtra"),
+    "thane": ("Thane", "Maharashtra"),
+    "kalyan": ("Kalyan", "Maharashtra"),
+    "navi mumbai": ("Navi Mumbai", "Maharashtra"),
+    "aurangabad": ("Aurangabad", "Maharashtra"),
+    "chhatrapati sambhajinagar":
+        ("Chhatrapati Sambhajinagar", "Maharashtra"),
+
+    # Karnataka
+    "bengaluru": ("Bengaluru", "Karnataka"),
+    "bangalore": ("Bengaluru", "Karnataka"),
+    "mysore": ("Mysuru", "Karnataka"),
+    "mysuru": ("Mysuru", "Karnataka"),
+    "mangalore": ("Mangaluru", "Karnataka"),
+    "mangaluru": ("Mangaluru", "Karnataka"),
+
+    # Kerala
+    "kochi": ("Kochi", "Kerala"),
+    "cochin": ("Kochi", "Kerala"),
+    "kottayam": ("Kottayam", "Kerala"),
+    "thiruvananthapuram":
+        ("Thiruvananthapuram", "Kerala"),
+    "trivandrum":
+        ("Thiruvananthapuram", "Kerala"),
+    "kozhikode":
+        ("Kozhikode", "Kerala"),
+    "calicut":
+        ("Kozhikode", "Kerala"),
+    "kollam":
+        ("Kollam", "Kerala"),
+    "alappuzha":
+        ("Alappuzha", "Kerala"),
+    "alleppey":
+        ("Alappuzha", "Kerala"),
+
+    # Tamil Nadu
+    "chennai":
+        ("Chennai", "Tamil Nadu"),
+    "madras":
+        ("Chennai", "Tamil Nadu"),
+    "coimbatore":
+        ("Coimbatore", "Tamil Nadu"),
+    "madurai":
+        ("Madurai", "Tamil Nadu"),
+    "salem":
+        ("Salem", "Tamil Nadu"),
+    "tiruchirappalli":
+        ("Tiruchirappalli", "Tamil Nadu"),
+    "trichy":
+        ("Tiruchirappalli", "Tamil Nadu"),
+    "tirunelveli":
+        ("Tirunelveli", "Tamil Nadu"),
+    "ooty":
+        ("Ooty", "Tamil Nadu"),
+    "udhagamandalam":
+        ("Ooty", "Tamil Nadu"),
+
+    # Telangana
+    "hyderabad":
+        ("Hyderabad", "Telangana"),
+    "secunderabad":
+        ("Secunderabad", "Telangana"),
+
+    # Andhra Pradesh
+    "tirupati":
+        ("Tirupati", "Andhra Pradesh"),
+    "visakhapatnam":
+        ("Visakhapatnam", "Andhra Pradesh"),
+    "vizag":
+        ("Visakhapatnam", "Andhra Pradesh"),
+    "vijayawada":
+        ("Vijayawada", "Andhra Pradesh"),
+    "guntur":
+        ("Guntur", "Andhra Pradesh"),
+
+    # Uttar Pradesh
+    "lucknow":
+        ("Lucknow", "Uttar Pradesh"),
+    "kanpur":
+        ("Kanpur", "Uttar Pradesh"),
+    "agra":
+        ("Agra", "Uttar Pradesh"),
+    "varanasi":
+        ("Varanasi", "Uttar Pradesh"),
+    "banaras":
+        ("Varanasi", "Uttar Pradesh"),
+    "noida":
+        ("Noida", "Uttar Pradesh"),
+    "greater noida":
+        ("Greater Noida", "Uttar Pradesh"),
+    "ghaziabad":
+        ("Ghaziabad", "Uttar Pradesh"),
+    "meerut":
+        ("Meerut", "Uttar Pradesh"),
+    "mathura":
+        ("Mathura", "Uttar Pradesh"),
+    "vrindavan":
+        ("Vrindavan", "Uttar Pradesh"),
+    "prayagraj":
+        ("Prayagraj", "Uttar Pradesh"),
+    "allahabad":
+        ("Prayagraj", "Uttar Pradesh"),
+
+    # Rajasthan
+    "jaipur":
+        ("Jaipur", "Rajasthan"),
+    "udaipur":
+        ("Udaipur", "Rajasthan"),
+    "jodhpur":
+        ("Jodhpur", "Rajasthan"),
+    "kota":
+        ("Kota", "Rajasthan"),
+    "ajmer":
+        ("Ajmer", "Rajasthan"),
+    "pushkar":
+        ("Pushkar", "Rajasthan"),
+
+    # Gujarat
+    "ahmedabad":
+        ("Ahmedabad", "Gujarat"),
+    "surat":
+        ("Surat", "Gujarat"),
+    "vadodara":
+        ("Vadodara", "Gujarat"),
+    "baroda":
+        ("Vadodara", "Gujarat"),
+    "rajkot":
+        ("Rajkot", "Gujarat"),
+    "gandhinagar":
+        ("Gandhinagar", "Gujarat"),
+
+    # Goa
+    "panaji":
+        ("Panaji", "Goa"),
+    "panjim":
+        ("Panaji", "Goa"),
+    "margao":
+        ("Margao", "Goa"),
+    "madgaon":
+        ("Margao", "Goa"),
+    "calangute":
+        ("Calangute", "Goa"),
+    "anjuna":
+        ("Anjuna", "Goa"),
+    "candolim":
+        ("Candolim", "Goa"),
+    "baga":
+        ("Baga", "Goa"),
+
+    # West Bengal
+    "kolkata":
+        ("Kolkata", "West Bengal"),
+    "calcutta":
+        ("Kolkata", "West Bengal"),
+    "darjeeling":
+        ("Darjeeling", "West Bengal"),
+
+    # Bihar
+    "patna":
+        ("Patna", "Bihar"),
+    "gaya":
+        ("Gaya", "Bihar"),
+
+    # Punjab
+    "amritsar":
+        ("Amritsar", "Punjab"),
+    "ludhiana":
+        ("Ludhiana", "Punjab"),
+    "chandigarh":
+        ("Chandigarh", "Chandigarh"),
+
+    # Haryana
+    "gurgaon":
+        ("Gurugram", "Haryana"),
+    "gurugram":
+        ("Gurugram", "Haryana"),
+    "faridabad":
+        ("Faridabad", "Haryana"),
+
+    # Odisha
+    "bhubaneswar":
+        ("Bhubaneswar", "Odisha"),
+    "puri":
+        ("Puri", "Odisha"),
+    "cuttack":
+        ("Cuttack", "Odisha"),
+
+    # Madhya Pradesh
+    "indore":
+        ("Indore", "Madhya Pradesh"),
+    "bhopal":
+        ("Bhopal", "Madhya Pradesh"),
+    "gwalior":
+        ("Gwalior", "Madhya Pradesh"),
+    "jabalpur":
+        ("Jabalpur", "Madhya Pradesh"),
+
+    # Jharkhand
+    "ranchi":
+        ("Ranchi", "Jharkhand"),
+    "jamshedpur":
+        ("Jamshedpur", "Jharkhand"),
+
+    # Chhattisgarh
+    "raipur":
+        ("Raipur", "Chhattisgarh"),
+
+    # Uttarakhand
+    "dehradun":
+        ("Dehradun", "Uttarakhand"),
+    "rishikesh":
+        ("Rishikesh", "Uttarakhand"),
+    "nainital":
+        ("Nainital", "Uttarakhand"),
+    "haridwar":
+        ("Haridwar", "Uttarakhand"),
+
+    # Jammu & Kashmir
+    "srinagar":
+        ("Srinagar", "Jammu and Kashmir"),
+    "jammu":
+        ("Jammu", "Jammu and Kashmir"),
+
+    # Himachal Pradesh
+    "shimla":
+        ("Shimla", "Himachal Pradesh"),
+    "manali":
+        ("Manali", "Himachal Pradesh"),
+    "dharamshala":
+        ("Dharamshala", "Himachal Pradesh"),
+
+    # Assam
+    "guwahati":
+        ("Guwahati", "Assam"),
 }
 
 
-# ================================================================
-# SORT CITY ALIASES
-# ================================================================
-#
-# Longest names first.
-# This is critical for:
-#
-#   New Delhi
-#   Navi Mumbai
-#   Greater Noida
-#   Vasco da Gama
-#
-# ================================================================
-
-SORTED_CITY_ALIASES = sorted(
-    CITY_ALIASES.items(),
+SORTED_CITIES = sorted(
+    CITY_MAP.items(),
     key=lambda x: len(x[0]),
     reverse=True
 )
 
 
 # ================================================================
-# GENERIC URL CATEGORY MAP
+# AREA / LOCALITY MAP
 # ================================================================
 
-CATEGORY_PATTERNS = [
+AREA_WORDS = {
 
-    (
-        "Restaurant",
-        [
-            "restaurant_review",
-            "restaurantsnear",
-            "restaurants",
-            "restaurant",
-            "dining",
-            "food",
-            "cafe",
-            "cafes",
-        ]
-    ),
+    # Delhi
+    "connaught place": "Connaught Place",
+    "karol bagh": "Karol Bagh",
+    "rohini": "Rohini",
+    "dwarka": "Dwarka",
+    "saket": "Saket",
+    "hauz khas": "Hauz Khas",
+    "lajpat nagar": "Lajpat Nagar",
+    "greater kailash": "Greater Kailash",
+    "gk": "Greater Kailash",
+    "sector 18": "Sector 18",
+    "sector 62": "Sector 62",
+    "sector 63": "Sector 63",
+    "sector 15": "Sector 15",
+    "vasant kunj": "Vasant Kunj",
+    "india gate": "India Gate",
+    "chandni chowk": "Chandni Chowk",
+    "old delhi": "Old Delhi",
+    "new friends colony": "New Friends Colony",
 
-    (
-        "Hotel",
-        [
-            "hotels",
-            "hotel",
-            "accommodation",
-            "resort",
-            "resorts",
-        ]
-    ),
+    # Common India
+    "mg road": "MG Road",
+    "marine drive": "Marine Drive",
+    "bandra": "Bandra",
+    "andheri": "Andheri",
+    "colaba": "Colaba",
+    "juhu": "Juhu",
+    "powai": "Powai",
 
-    (
-        "Attraction",
-        [
-            "attraction_review",
-            "attractions",
-            "activities",
-            "things_to_do",
-            "thingstodo",
-        ]
-    ),
+    # Bengaluru
+    "koramangala": "Koramangala",
+    "indiranagar": "Indiranagar",
+    "whitefield": "Whitefield",
+    "electronic city": "Electronic City",
+}
 
-    (
-        "Tourism",
-        [
-            "tourism",
-            "vacations",
-            "travel",
-        ]
-    ),
-]
+
+SORTED_AREAS = sorted(
+    AREA_WORDS.items(),
+    key=lambda x: len(x[0]),
+    reverse=True
+)
+
+
+# ================================================================
+# CATEGORY KEYWORDS
+# ================================================================
+
+CATEGORY_URL_WORDS = {
+
+    "Restaurant": [
+        "restaurant_review",
+        "restaurantsnear",
+        "restaurants",
+        "restaurant",
+        "dining",
+        "food",
+        "cafe",
+        "cafes",
+        "eatery",
+        "eateries",
+        "bar",
+        "bars",
+    ],
+
+    "Hotel": [
+        "hotels",
+        "hotel",
+        "accommodation",
+        "resort",
+        "resorts",
+        "stay",
+        "stays",
+        "lodging",
+    ],
+
+    "Attraction": [
+        "attraction_review",
+        "attractions",
+        "activities",
+        "things_to_do",
+        "thingstodo",
+        "places_to_visit",
+        "places-to-visit",
+        "sightseeing",
+        "landmarks",
+    ],
+
+    "Tourism": [
+        "tourism",
+        "vacations",
+        "vacation",
+        "travel",
+        "trip",
+        "trips",
+        "tour",
+        "tours",
+    ],
+}
+
+
+# ================================================================
+# URL STOP WORDS
+# ================================================================
+
+URL_STOP_WORDS = {
+
+    "www",
+    "com",
+    "in",
+    "org",
+    "net",
+    "co",
+    "india",
+
+    "the",
+    "and",
+    "or",
+    "of",
+    "for",
+    "with",
+    "from",
+    "near",
+
+    "reviews",
+    "review",
+    "listing",
+    "listings",
+    "directory",
+    "search",
+
+    "page",
+    "pages",
+    "html",
+    "htm",
+    "php",
+    "aspx",
+
+    "amp",
+}
 
 
 # ================================================================
@@ -724,81 +609,90 @@ CATEGORY_PATTERNS = [
 # ================================================================
 
 def normalize_url(value):
-    """
-    Convert URL value into a clean plain URL.
 
-    Handles:
-        [https://example.com](https://example.com)
-        HTML entities
-        encoded URLs
-        whitespace
-    """
-
-    if pd.isna(value):
+    if value is None:
         return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
 
     url = str(value).strip()
 
     if not url:
         return ""
 
-    # HTML entities
+    # Decode HTML entities
     url = html.unescape(url)
 
-    # Markdown link:
-    # [text](url)
+    # Extract URL from markdown
     markdown_match = re.search(
-        r"\]\((https?://[^)]+)\)",
+        r'https?://[^\s\)\]\>]+',
         url,
         flags=re.IGNORECASE
     )
 
     if markdown_match:
-        url = markdown_match.group(1)
-
-    else:
-        # If URL appears somewhere inside text
-        plain_match = re.search(
-            r"https?://[^\s)\]]+",
-            url,
-            flags=re.IGNORECASE
-        )
-
-        if plain_match:
-            url = plain_match.group(0)
+        url = markdown_match.group(0)
 
     # Decode URL
     url = unquote(url)
 
-    # Remove trailing punctuation
-    url = url.strip(" <>\"'")
+    # Clean
+    url = url.strip(
+        ' <>"\''
+    )
 
-    url = url.rstrip(".,;")
+    url = url.rstrip(
+        ".,;"
+    )
 
     return url
 
 
 # ================================================================
-# NORMALIZE LOCATION TEXT
+# NORMALIZE TEXT
 # ================================================================
 
-def normalize_location_text(text):
-    """
-    Normalize URL slug/location text for matching.
-    """
+def normalize_text(text):
 
-    if not text:
+    if text is None:
         return ""
 
-    text = unquote(str(text))
+    text = unquote(
+        str(text)
+    )
 
-    text = text.replace("-", " ")
-    text = text.replace("_", " ")
-    text = text.replace("%20", " ")
+    text = html.unescape(
+        text
+    )
 
-    text = re.sub(r"\s+", " ", text)
+    text = text.lower()
 
-    return text.strip().lower()
+    text = text.replace(
+        "-",
+        " "
+    )
+
+    text = text.replace(
+        "_",
+        " "
+    )
+
+    text = text.replace(
+        "/",
+        " "
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    return text.strip()
 
 
 # ================================================================
@@ -806,819 +700,216 @@ def normalize_location_text(text):
 # ================================================================
 
 def get_url_path(url):
-    """
-    Return decoded URL path.
-    """
+
+    if not url:
+        return ""
 
     try:
-        parsed = urlparse(url)
+
+        parsed = urlparse(
+            url
+        )
 
         path = parsed.path
 
-        path = unquote(path)
-
-        return path
+        return unquote(
+            path
+        )
 
     except Exception:
+
         return url
 
 
 # ================================================================
-# GET URL SLUG TEXT
+# GET SEARCHABLE URL TEXT
 # ================================================================
 
 def get_search_text(url):
-    """
-    Creates a searchable version of the URL.
-    """
 
-    path = get_url_path(url)
+    path = get_url_path(
+        url
+    )
 
-    text = normalize_location_text(path)
-
-    return text
+    return normalize_text(
+        path
+    )
 
 
 # ================================================================
-# STATE EXTRACTION
+# FIND STATE
 # ================================================================
 
 def extract_state(url):
-    """
-    Extract Indian state / UT from URL.
 
-    Longer states are checked first so that:
-        Daman and Diu
-        Jammu and Kashmir
-        Dadra and Nagar Haveli...
-    are correctly detected.
-    """
+    text = get_search_text(
+        url
+    )
 
-    search_text = get_search_text(url)
+    if not text:
+        return ""
 
-    if not search_text:
-        return "Unknown"
-
-    # Sort longest state names first
-    sorted_states = sorted(
-        ALL_INDIAN_STATES.items(),
+    states = sorted(
+        STATE_MAP.items(),
         key=lambda x: len(x[0]),
         reverse=True
     )
 
-    for state_key, state_name in sorted_states:
-
-        pattern = r"(?<![a-z])" + re.escape(state_key) + r"(?![a-z])"
-
-        if re.search(pattern, search_text):
-            return state_name
-
-    return "Unknown"
-
-
-# ================================================================
-# COUNTRY EXTRACTION
-# ================================================================
-
-def extract_country(state):
-    """
-    If an Indian state/UT is detected,
-    country is India.
-    """
-
-    if state != "Unknown":
-        return "India"
-
-    return "Unknown"
-
-
-# ================================================================
-# REGION EXTRACTION
-# ================================================================
-
-def extract_region(state):
-    """
-    Get Indian geographical region.
-    """
-
-    return REGION_MAP.get(state, "Unknown")
-
-
-# ================================================================
-# FIND CITY BY KNOWN CITY LIST
-# ================================================================
-
-def find_known_city(search_text, state="Unknown"):
-    """
-    Find city from known city aliases.
-
-    Multi-word cities are checked first.
-    """
-
-    if not search_text:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # State-specific city filtering
-    # ------------------------------------------------------------
-
-    state_city_rules = {
-
-        "Delhi": {
-            "new delhi",
-            "new_delhi",
-            "delhi",
-        },
-
-        "Maharashtra": {
-            "mumbai",
-            "navi mumbai",
-            "thane",
-            "kalyan",
-            "pune",
-            "nagpur",
-            "nashik",
-            "nasik",
-            "aurangabad",
-            "chhatrapati sambhajinagar",
-            "solapur",
-            "kolhapur",
-            "satara",
-            "ratnagiri",
-            "alibag",
-            "lonavala",
-            "mahabaleshwar",
-        },
-
-        "Karnataka": {
-            "bengaluru",
-            "bangalore",
-            "mysuru",
-            "mysore",
-            "mangalore",
-            "mangaluru",
-            "hubli",
-            "hubballi",
-            "belgaum",
-            "belagavi",
-            "coorg",
-            "madikeri",
-            "hampi",
-        },
-
-        "Tamil Nadu": {
-            "chennai",
-            "madras",
-            "coimbatore",
-            "madurai",
-            "salem",
-            "tiruchirappalli",
-            "trichy",
-            "tirunelveli",
-            "thoothukudi",
-            "tuticorin",
-            "rameswaram",
-            "ooty",
-            "udagamandalam",
-            "kodaikanal",
-            "kanyakumari",
-            "mahabalipuram",
-            "mamallapuram",
-            "thanjavur",
-            "tanjore",
-            "vellore",
-            "erode",
-        },
-
-        "Kerala": {
-            "kochi",
-            "cochin",
-            "thiruvananthapuram",
-            "trivandrum",
-            "kozhikode",
-            "calicut",
-            "thrissur",
-            "trichur",
-            "kollam",
-            "alleppey",
-            "alappuzha",
-            "kottayam",
-            "munnar",
-            "varkala",
-            "kovalam",
-            "thekkady",
-        },
-
-        "Telangana": {
-            "hyderabad",
-            "secunderabad",
-            "warangal",
-            "nizamabad",
-            "karimnagar",
-        },
-
-        "Andhra Pradesh": {
-            "visakhapatnam",
-            "vizag",
-            "vijayawada",
-            "tirupati",
-            "guntur",
-            "nellore",
-            "kurnool",
-            "rajahmundry",
-            "kakinada",
-            "amaravati",
-        },
-
-        "Gujarat": {
-            "ahmedabad",
-            "surat",
-            "vadodara",
-            "baroda",
-            "rajkot",
-            "bhavnagar",
-            "jamnagar",
-            "gandhinagar",
-            "dwarka",
-            "somnath",
-            "porbandar",
-            "bhuj",
-        },
-
-        "Rajasthan": {
-            "jaipur",
-            "jodhpur",
-            "udaipur",
-            "kota",
-            "ajmer",
-            "bikaner",
-            "pushkar",
-            "mount abu",
-            "mount_abu",
-        },
-
-        "Uttar Pradesh": {
-            "lucknow",
-            "kanpur",
-            "agra",
-            "varanasi",
-            "allahabad",
-            "prayagraj",
-            "mathura",
-            "vrindavan",
-            "ayodhya",
-            "meerut",
-            "bareilly",
-            "aligarh",
-            "gorakhpur",
-            "jhansi",
-            "fatehpur sikri",
-            "fatehpur_sikri",
-            "noida",
-            "greater noida",
-            "greater_noida",
-        },
-
-        "Uttarakhand": {
-            "dehradun",
-            "haridwar",
-            "rishikesh",
-            "mussoorie",
-            "nainital",
-            "almora",
-            "ranikhet",
-            "jim corbett",
-            "jim_corbett",
-        },
-
-        "Himachal Pradesh": {
-            "shimla",
-            "manali",
-            "dharamshala",
-            "dharamsala",
-            "mcleod ganj",
-            "mcleod_ganj",
-            "kullu",
-            "dalhousie",
-            "kasol",
-            "spiti",
-        },
-
-        "Punjab": {
-            "amritsar",
-            "ludhiana",
-            "jalandhar",
-            "patiala",
-            "bathinda",
-        },
-
-        "Jammu and Kashmir": {
-            "srinagar",
-            "jammu",
-            "gulmarg",
-            "pahalgam",
-            "sonamarg",
-            "kashmir",
-        },
-
-        "Ladakh": {
-            "leh",
-            "kargil",
-        },
-
-        "West Bengal": {
-            "kolkata",
-            "calcutta",
-            "darjeeling",
-            "siliguri",
-            "durgapur",
-            "howrah",
-            "kalimpong",
-        },
-
-        "Odisha": {
-            "bhubaneswar",
-            "cuttack",
-            "puri",
-            "konark",
-            "rourkela",
-        },
-
-        "Bihar": {
-            "patna",
-            "gaya",
-            "bodh gaya",
-            "bodh_gaya",
-            "muzaffarpur",
-        },
-
-        "Jharkhand": {
-            "ranchi",
-            "jamshedpur",
-            "dhanbad",
-            "deoghar",
-        },
-
-        "Madhya Pradesh": {
-            "bhopal",
-            "indore",
-            "gwalior",
-            "jabalpur",
-            "ujjain",
-            "khajuraho",
-            "sanchi",
-            "mandu",
-        },
-
-        "Chhattisgarh": {
-            "raipur",
-            "bilaspur",
-            "durg",
-            "bhilai",
-        },
-
-        "Assam": {
-            "guwahati",
-            "dibrugarh",
-            "jorhat",
-            "silchar",
-            "kaziranga",
-        },
-
-        "Goa": {
-            "panaji",
-            "panjim",
-            "margao",
-            "madgaon",
-            "vasco da gama",
-            "vasco_da_gama",
-            "calangute",
-            "baga",
-            "anjuna",
-            "candolim",
-            "palolem",
-        },
-
-        "Dadra and Nagar Haveli and Daman and Diu": {
-            "daman",
-            "diu",
-            "silvassa",
-        },
-
-        "Puducherry": {
-            "puducherry",
-            "pondicherry",
-        },
-
-        "Andaman and Nicobar Islands": {
-            "port blair",
-            "port_blair",
-        },
-
-        "Lakshadweep": {
-            "kavaratti",
-        },
-
-        "Sikkim": {
-            "gangtok",
-        },
-
-        "Meghalaya": {
-            "shillong",
-            "cherrapunji",
-        },
-
-        "Manipur": {
-            "imphal",
-        },
-
-        "Mizoram": {
-            "aizawl",
-        },
-
-        "Nagaland": {
-            "kohima",
-        },
-
-        "Tripura": {
-            "agartala",
-        },
-
-        "Arunachal Pradesh": {
-            "itanagar",
-        },
-    }
-
-    allowed = state_city_rules.get(state)
-
-    # ------------------------------------------------------------
-    # If state is known, first check its cities
-    # ------------------------------------------------------------
-
-    if allowed:
-
-        sorted_allowed = sorted(
-            allowed,
-            key=len,
-            reverse=True
-        )
-
-        for city_key in sorted_allowed:
-
-            normalized_city = normalize_location_text(city_key)
-
-            pattern = (
-                r"(?<![a-z])"
-                + re.escape(normalized_city)
-                + r"(?![a-z])"
-            )
-
-            if re.search(pattern, search_text):
-                return CITY_ALIASES.get(
-                    city_key,
-                    city_key.title()
-                )
-
-    # ------------------------------------------------------------
-    # Fallback: search all cities
-    # ------------------------------------------------------------
-
-    for city_key, city_name in SORTED_CITY_ALIASES:
-
-        normalized_city = normalize_location_text(city_key)
+    for state_key, state_name in states:
 
         pattern = (
-            r"(?<![a-z])"
-            + re.escape(normalized_city)
-            + r"(?![a-z])"
+            r"\b"
+            + re.escape(state_key)
+            + r"\b"
         )
 
-        if re.search(pattern, search_text):
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE
+        ):
+            return state_name
+
+    return ""
+
+
+# ================================================================
+# FIND CITY
+# ================================================================
+
+def find_city(
+    text,
+    detected_state=""
+):
+
+    if not text:
+        return ""
+
+    text = normalize_text(
+        text
+    )
+
+    for city_key, city_info in SORTED_CITIES:
+
+        city_name, city_state = city_info
+
+        # If state is known, make sure city belongs to it
+        if (
+            detected_state
+            and city_state != detected_state
+        ):
+            continue
+
+        pattern = (
+            r"\b"
+            + re.escape(city_key)
+            + r"\b"
+        )
+
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE
+        ):
             return city_name
 
-    return "Unknown"
-
-
-# ================================================================
-# GENERIC CITY EXTRACTION FROM TRIPADVISOR URL
-# ================================================================
-
-def extract_city_from_tripadvisor_slug(url, state):
-    """
-    Fallback parser for Tripadvisor URLs.
-
-    Examples:
-
-        Kalyan_Thane_District_Maharashtra
-        Tirupati_Chittoor_District_Andhra_Pradesh
-        Virudhunagar_Virudhunagar_District_Tamil_Nadu
-        Daman_Daman_and_Diu
-
-    """
-
-    path = get_url_path(url)
-
-    if not path:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # Remove extension
-    # ------------------------------------------------------------
-
-    path = re.sub(
-        r"\.html?$",
-        "",
-        path,
-        flags=re.IGNORECASE
-    )
-
-    # ------------------------------------------------------------
-    # Get last path section
-    # ------------------------------------------------------------
-
-    slug = path.split("/")[-1]
-
-    if not slug:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # Tripadvisor removes some information into:
-    #
-    #   -Reviews-City...
-    #   -City...
-    #
-    # ------------------------------------------------------------
-
-    # Remove known Tripadvisor prefixes
-    slug = re.sub(
-        r"^(Reviews-|Activities-|Hotels-|Restaurants-|Vacations-)",
-        "",
-        slug,
-        flags=re.IGNORECASE
-    )
-
-    # ------------------------------------------------------------
-    # Convert underscores to spaces
-    # ------------------------------------------------------------
-
-    clean_slug = normalize_location_text(slug)
-
-    if not clean_slug:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # If state known, attempt to isolate text before state.
-    # ------------------------------------------------------------
-
-    if state != "Unknown":
-
-        state_key = state.lower()
-
-        # Special state aliases
-        state_variants = [
-            state_key,
-            state_key.replace(" ", "_"),
-        ]
-
-        if state == "Delhi":
-            state_variants.extend([
-                "national capital territory of delhi",
-                "national_capital_territory_of_delhi",
-            ])
-
-        if state == "Jammu and Kashmir":
-            state_variants.extend([
-                "jammu and kashmir",
-                "jammu_and_kashmir",
-            ])
-
-        if state == "Dadra and Nagar Haveli and Daman and Diu":
-            state_variants.extend([
-                "daman and diu",
-                "daman_and_diu",
-                "dadra and nagar haveli and daman and diu",
-                "dadra_and_nagar_haveli_and_daman_and_diu",
-            ])
-
-        # Find the state in original slug
-        original_slug = slug.lower()
-
-        state_position = -1
-        matched_state_variant = None
-
-        for variant in sorted(
-            state_variants,
-            key=len,
-            reverse=True
-        ):
-
-            pos = original_slug.rfind(variant)
-
-            if pos != -1:
-
-                if pos > state_position:
-                    state_position = pos
-                    matched_state_variant = variant
-
-        if state_position >= 0 and matched_state_variant:
-
-            before_state = original_slug[
-                :state_position
-            ].strip("_- ")
-
-            before_state = normalize_location_text(
-                before_state
-            )
-
-        else:
-            before_state = clean_slug
-
-    else:
-        before_state = clean_slug
-
-    # ------------------------------------------------------------
-    # Remove common Tripadvisor suffixes
-    # ------------------------------------------------------------
-
-    before_state = re.sub(
-        r"\b(?:district|state|india)\b",
-        " ",
-        before_state,
-        flags=re.IGNORECASE
-    )
-
-    before_state = re.sub(
-        r"\bnational capital territory\b",
-        " ",
-        before_state,
-        flags=re.IGNORECASE
-    )
-
-    before_state = re.sub(
-        r"\b(?:north|south|east|west|central)\b",
-        " ",
-        before_state,
-        flags=re.IGNORECASE
-    )
-
-    before_state = re.sub(
-        r"\b(?:goa|kashmir)\b",
-        " ",
-        before_state,
-        flags=re.IGNORECASE
-    )
-
-    before_state = re.sub(
-        r"\s+",
-        " ",
-        before_state
-    ).strip()
-
-    # ------------------------------------------------------------
-    # Remove district information
-    # ------------------------------------------------------------
-
-    before_state = re.sub(
-        r"\b[a-z ]*district\b",
-        " ",
-        before_state,
-        flags=re.IGNORECASE
-    )
-
-    before_state = re.sub(
-        r"\s+",
-        " ",
-        before_state
-    ).strip()
-
-    # ------------------------------------------------------------
-    # Try known city again on reduced text
-    # ------------------------------------------------------------
-
-    city = find_known_city(
-        before_state,
-        state
-    )
-
-    if city != "Unknown":
-        return city
-
-    # ------------------------------------------------------------
-    # Split slug
-    # ------------------------------------------------------------
-
-    parts = [
-        x.strip()
-        for x in before_state.split()
-        if x.strip()
-    ]
-
-    if not parts:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # Remove common location descriptors
-    # ------------------------------------------------------------
-
-    stop_words = {
-        "district",
-        "national",
-        "capital",
-        "territory",
-        "north",
-        "south",
-        "east",
-        "west",
-        "central",
-    }
-
-    parts = [
-        p for p in parts
-        if p.lower() not in stop_words
-    ]
-
-    if not parts:
-        return "Unknown"
-
-    # ------------------------------------------------------------
-    # First meaningful part is usually city
-    # ------------------------------------------------------------
-
-    candidate = parts[0]
-
-    candidate = candidate.strip()
-
-    if len(candidate) < 2:
-        return "Unknown"
-
-    return candidate.title()
+    return ""
 
 
 # ================================================================
 # CITY EXTRACTION
 # ================================================================
 
-def extract_city(url, state):
-    """
-    Main city extraction function.
-    """
+def extract_city(
+    url,
+    state
+):
 
-    search_text = get_search_text(url)
+    text = get_search_text(
+        url
+    )
 
-    if not search_text:
-        return "Unknown"
+    if not text:
+        return ""
 
-    # ------------------------------------------------------------
-    # IMPORTANT:
-    # Known city extraction comes FIRST.
-    # This prevents:
-    #
-    # Anjuna_Bardez_North_Goa_District_Goa
-    #
-    # from becoming:
-    #
-    # City = Goa
-    #
-    # ------------------------------------------------------------
-
-    city = find_known_city(
-        search_text,
+    # First try known city
+    city = find_city(
+        text,
         state
     )
 
-    if city != "Unknown":
+    if city:
         return city
 
-    # ------------------------------------------------------------
-    # Tripadvisor fallback
-    # ------------------------------------------------------------
+    return ""
 
-    if "tripadvisor" in search_text:
 
-        city = extract_city_from_tripadvisor_slug(
-            url,
-            state
-        )
+# ================================================================
+# COUNTRY EXTRACTION
+# ================================================================
 
-        if city != "Unknown":
-            return city
+def extract_country(
+    url,
+    state
+):
 
-    return "Unknown"
+    text = get_search_text(
+        url
+    )
+
+    if not text:
+        return ""
+
+    # Only return country if India is actually present
+    if re.search(
+        r"\bindia\b",
+        text,
+        flags=re.IGNORECASE
+    ):
+        return "India"
+
+    # If an Indian state/city was explicitly detected,
+    # country can reasonably be identified as India.
+    if state:
+        return "India"
+
+    return ""
+
+
+# ================================================================
+# REGION EXTRACTION
+# ================================================================
+
+def extract_region(
+    state
+):
+
+    if not state:
+        return ""
+
+    return REGION_MAP.get(
+        state,
+        ""
+    )
 
 
 # ================================================================
 # URL LOCATION
 # ================================================================
 
-def extract_url_location(city, state):
-    """
-    Create URL_Location value.
-    """
+def extract_url_location(
+    city,
+    area
+):
 
-    if city != "Unknown":
+    # City gets priority
+    if city:
         return city
 
-    return "Unknown"
+    if area:
+        return area
+
+    return ""
 
 
 # ================================================================
@@ -1626,120 +917,414 @@ def extract_url_location(city, state):
 # ================================================================
 
 def extract_category(url):
-    """
-    Extract category from URL.
-    """
 
-    if not url:
-        return "Unknown"
-
-    text = get_search_text(url)
+    text = get_search_text(
+        url
+    )
 
     if not text:
-        return "Unknown"
+        return ""
 
-    # ------------------------------------------------------------
-    # More specific patterns first
-    # ------------------------------------------------------------
+    # Check categories in priority order
+    for category, patterns in CATEGORY_URL_WORDS.items():
 
-    # Restaurants
-    restaurant_patterns = [
-        "restaurant_review",
-        "restaurantsnear",
-        "restaurants",
-        "restaurant",
-    ]
+        for pattern in patterns:
 
-    for pattern in restaurant_patterns:
+            pattern_normalized = normalize_text(
+                pattern
+            )
 
-        if pattern in text:
-            return "Restaurant"
+            regex = (
+                r"\b"
+                + re.escape(pattern_normalized)
+                + r"\b"
+            )
 
-    # Hotels
-    hotel_patterns = [
-        "hotels",
-        "hotel",
-        "resorts",
-        "resort",
-    ]
+            if re.search(
+                regex,
+                text,
+                flags=re.IGNORECASE
+            ):
+                return category
 
-    for pattern in hotel_patterns:
-
-        if pattern in text:
-            return "Hotel"
-
-    # Attractions
-    attraction_patterns = [
-        "attraction_review",
-        "attractions",
-        "activities",
-        "things_to_do",
-        "thingstodo",
-    ]
-
-    for pattern in attraction_patterns:
-
-        if pattern in text:
-            return "Attraction"
-
-    # Tourism
-    tourism_patterns = [
-        "tourism",
-        "vacations",
-        "vacation",
-        "travel",
-    ]
-
-    for pattern in tourism_patterns:
-
-        if pattern in text:
-            return "Tourism"
-
-    # Cafes
-    if "cafe" in text or "cafes" in text:
-        return "Restaurant"
-
-    return "Unknown"
+    return ""
 
 
 # ================================================================
-# PROCESS ONE URL
+# AREA EXTRACTION
 # ================================================================
 
-def extract_location_data(url):
-    """
-    Extract all location/category fields from one URL.
-    """
+def extract_area(url):
 
-    clean_url = normalize_url(url)
+    text = get_search_text(
+        url
+    )
 
-    if not clean_url:
-        return {
-            "City": "Unknown",
-            "State": "Unknown",
-            "Country": "Unknown",
-            "Region": "Unknown",
-            "URL_Location": "Unknown",
-            "Category": "Unknown",
-        }
+    if not text:
+        return ""
+
+    for area_key, area_name in SORTED_AREAS:
+
+        pattern = (
+            r"\b"
+            + re.escape(area_key)
+            + r"\b"
+        )
+
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE
+        ):
+            return area_name
+
+    return ""
+
+
+# ================================================================
+# URL TOKENS
+# ================================================================
+
+def url_tokens(url):
+
+    path = get_url_path(
+        url
+    )
+
+    if not path:
+        return []
+
+    # Remove extensions
+    path = re.sub(
+        r"\.(html?|php|aspx?)$",
+        "",
+        path,
+        flags=re.IGNORECASE
+    )
+
+    # Convert separators to spaces
+    path = re.sub(
+        r"[-_/]+",
+        " ",
+        path
+    )
+
+    # Normalize
+    path = normalize_text(
+        path
+    )
+
+    # Extract words
+    tokens = re.findall(
+        r"[a-z0-9]+",
+        path
+    )
+
+    # Remove useless URL words
+    cleaned_tokens = []
+
+    for token in tokens:
+
+        if token in URL_STOP_WORDS:
+            continue
+
+        if len(token) <= 1:
+            continue
+
+        cleaned_tokens.append(
+            token
+        )
+
+    return cleaned_tokens
+
+
+# ================================================================
+# TOKEN SET FROM LOCATION / CATEGORY
+# ================================================================
+
+def metadata_tokens(
+    url,
+    city,
+    state,
+    country,
+    region,
+    area,
+    category
+):
+
+    text = get_search_text(
+        url
+    )
+
+    words = set()
 
     # ------------------------------------------------------------
-    # State FIRST
+    # City
     # ------------------------------------------------------------
 
-    state = extract_state(clean_url)
+    if city:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(city)
+            )
+        )
+
+    # ------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------
+
+    if state:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(state)
+            )
+        )
 
     # ------------------------------------------------------------
     # Country
     # ------------------------------------------------------------
 
-    country = extract_country(state)
+    if country:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(country)
+            )
+        )
 
     # ------------------------------------------------------------
     # Region
     # ------------------------------------------------------------
 
-    region = extract_region(state)
+    if region:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(region)
+            )
+        )
+
+    # ------------------------------------------------------------
+    # Area
+    # ------------------------------------------------------------
+
+    if area:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(area)
+            )
+        )
+
+    # ------------------------------------------------------------
+    # Category
+    # ------------------------------------------------------------
+
+    if category:
+
+        words.update(
+            re.findall(
+                r"[a-z0-9]+",
+                normalize_text(category)
+            )
+        )
+
+        # Add category URL words actually found in URL
+        if category in CATEGORY_URL_WORDS:
+
+            for category_word in CATEGORY_URL_WORDS[category]:
+
+                normalized_category_word = normalize_text(
+                    category_word
+                )
+
+                if normalized_category_word in text:
+
+                    words.update(
+                        re.findall(
+                            r"[a-z0-9]+",
+                            normalized_category_word
+                        )
+                    )
+
+    # ------------------------------------------------------------
+    # Explicit URL metadata words
+    # ------------------------------------------------------------
+
+    words.update(
+        {
+            "india",
+            "north",
+            "south",
+            "east",
+            "west",
+            "central",
+            "northeast",
+        }
+    )
+
+    return words
+
+
+# ================================================================
+# URL KEYWORD EXTRACTION
+# ================================================================
+
+def extract_url_keywords(
+    url,
+    keyword,
+    city,
+    state,
+    country,
+    region,
+    area,
+    category
+):
+
+    tokens = url_tokens(
+        url
+    )
+
+    if not tokens:
+
+        return "", ""
+
+    # Metadata words are NOT considered keyword
+    metadata = metadata_tokens(
+        url,
+        city,
+        state,
+        country,
+        region,
+        area,
+        category
+    )
+
+    # ------------------------------------------------------------
+    # Original source keyword
+    # ------------------------------------------------------------
+
+    keyword_tokens = re.findall(
+        r"[a-z0-9]+",
+        normalize_text(keyword)
+    )
+
+    # ------------------------------------------------------------
+    # URL keyword
+    # ------------------------------------------------------------
+
+    remaining_tokens = tokens.copy()
+
+    matched_keyword = []
+
+    for token in keyword_tokens:
+
+        # Do not duplicate metadata
+        if token in metadata:
+            continue
+
+        if token in remaining_tokens:
+
+            matched_keyword.append(
+                token
+            )
+
+            remaining_tokens.remove(
+                token
+            )
+
+    # ------------------------------------------------------------
+    # Important behavior:
+    #
+    # If the original Keyword does not match the URL,
+    # do NOT blindly put the first random URL word
+    # into URL_Keyword.
+    #
+    # Instead, keep URL_Keyword blank and put meaningful
+    # remaining URL words into Remaining_Url_Keywords.
+    # ------------------------------------------------------------
+
+    url_keyword = " ".join(
+        matched_keyword
+    ).strip()
+
+    # ------------------------------------------------------------
+    # Remaining URL keywords
+    # ------------------------------------------------------------
+
+    remaining_meaningful = []
+
+    for token in remaining_tokens:
+
+        if token in metadata:
+            continue
+
+        if token in URL_STOP_WORDS:
+            continue
+
+        if len(token) <= 1:
+            continue
+
+        remaining_meaningful.append(
+            token
+        )
+
+    remaining_keyword = " ".join(
+        remaining_meaningful
+    ).strip()
+
+    return (
+        url_keyword,
+        remaining_keyword
+    )
+
+
+# ================================================================
+# COMPLETE URL EXTRACTION
+# ================================================================
+
+def extract_location_data(
+    url,
+    keyword=""
+):
+
+    clean_url = normalize_url(
+        url
+    )
+
+    # Empty URL
+    if not clean_url:
+
+        return {
+
+            "City": "",
+            "State": "",
+            "Country": "",
+            "Region": "",
+            "URL_Location": "",
+            "Area": "",
+            "Category": "",
+            "URL_Keyword": "",
+            "Unknown": "",
+            "Remaining_Url_Keywords": "",
+            "Priority Rank": 1,
+
+        }
+
+    # ------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------
+
+    state = extract_state(
+        clean_url
+    )
 
     # ------------------------------------------------------------
     # City
@@ -1751,12 +1336,37 @@ def extract_location_data(url):
     )
 
     # ------------------------------------------------------------
-    # URL location
+    # Area
+    # ------------------------------------------------------------
+
+    area = extract_area(
+        clean_url
+    )
+
+    # ------------------------------------------------------------
+    # Country
+    # ------------------------------------------------------------
+
+    country = extract_country(
+        clean_url,
+        state
+    )
+
+    # ------------------------------------------------------------
+    # Region
+    # ------------------------------------------------------------
+
+    region = extract_region(
+        state
+    )
+
+    # ------------------------------------------------------------
+    # URL Location
     # ------------------------------------------------------------
 
     url_location = extract_url_location(
         city,
-        state
+        area
     )
 
     # ------------------------------------------------------------
@@ -1767,36 +1377,72 @@ def extract_location_data(url):
         clean_url
     )
 
+    # ------------------------------------------------------------
+    # URL Keyword
+    # ------------------------------------------------------------
+
+    url_keyword, remaining_url_keywords = extract_url_keywords(
+        clean_url,
+        keyword,
+        city,
+        state,
+        country,
+        region,
+        area,
+        category
+    )
+
+    # ------------------------------------------------------------
+    # Final result
+    # ------------------------------------------------------------
+
     return {
+
         "City": city,
+
         "State": state,
+
         "Country": country,
+
         "Region": region,
+
         "URL_Location": url_location,
+
+        "Area": area,
+
         "Category": category,
+
+        "URL_Keyword": url_keyword,
+
+        "Unknown": "",
+
+        "Remaining_Url_Keywords":
+            remaining_url_keywords,
+
+        "Priority Rank": 1,
     }
 
 
 # ================================================================
-# DETECT URL COLUMN
+# FIND URL COLUMN
 # ================================================================
 
 def find_url_column(df):
-    """
-    Automatically find ranking URL column.
-    """
 
     possible_columns = [
+
         "Ranking URL",
         "Ranking_URL",
+        "RankingURL",
         "URL",
         "url",
         "Url",
-        "RankingURL",
         "ranking_url",
+        "ranking url",
+
     ]
 
-    # Exact matches first
+    # Exact match
     for column in possible_columns:
 
         if column in df.columns:
@@ -1812,7 +1458,10 @@ def find_url_column(df):
             .replace("_", " ")
         )
 
-        if "ranking" in normalized and "url" in normalized:
+        if (
+            "ranking" in normalized
+            and "url" in normalized
+        ):
             return column
 
         if normalized == "url":
@@ -1825,16 +1474,17 @@ def find_url_column(df):
 # READ CSV SAFELY
 # ================================================================
 
-def read_csv_safely(file_path):
-    """
-    Read CSV with multiple encoding fallbacks.
-    """
+def read_csv_safely(
+    file_path
+):
 
     encodings = [
+
         "utf-8-sig",
         "utf-8",
         "cp1252",
         "latin1",
+
     ]
 
     last_error = None
@@ -1843,13 +1493,11 @@ def read_csv_safely(file_path):
 
         try:
 
-            df = pd.read_csv(
+            return pd.read_csv(
                 file_path,
                 encoding=encoding,
                 low_memory=False
             )
-
-            return df
 
         except Exception as error:
 
@@ -1859,32 +1507,82 @@ def read_csv_safely(file_path):
 
 
 # ================================================================
-# SAFE CSV SAVE
+# COLUMN ORDER
 # ================================================================
 
-def safe_save_csv(df, output_path):
-    """
-    Save CSV safely.
+def arrange_columns(df):
 
-    If the target file is locked by:
-        Excel
-        VS Code
-        OneDrive
-        another process
+    required_order = [
 
-    the script creates an alternate file instead of crashing.
-    """
+        "No",
+        "Keyword",
+        "Volume",
+        "Position",
+        "Estimated Visits",
+        "CPC",
+        "Paid Difficulty",
+        "SEO Difficulty",
+        "Ranking URL",
 
-    output_path = Path(output_path)
+        "City",
+        "State",
+        "Country",
+        "Region",
+        "URL_Location",
+        "Area",
+        "Category",
 
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+        "URL_Keyword",
+        "Unknown",
+        "Remaining_Url_Keywords",
 
-    # ------------------------------------------------------------
-    # Attempt 1: normal save
-    # ------------------------------------------------------------
+        "Priority Rank",
+
+    ]
+
+    # Make sure required columns exist
+    for column in required_order:
+
+        if column not in df.columns:
+
+            if column == "Priority Rank":
+
+                df[column] = 1
+
+            else:
+
+                df[column] = ""
+
+    # Keep only desired order + any original extra columns
+    existing = [
+
+        column
+        for column in required_order
+        if column in df.columns
+
+    ]
+
+    remaining = [
+
+        column
+        for column in df.columns
+        if column not in existing
+
+    ]
+
+    return df[
+        existing + remaining
+    ]
+
+
+# ================================================================
+# SAVE CSV
+# ================================================================
+
+def save_csv(
+    df,
+    output_path
+):
 
     try:
 
@@ -1896,447 +1594,427 @@ def safe_save_csv(df, output_path):
 
         print()
         print("Output saved successfully:")
-        print(f"  {output_path}")
+        print(output_path)
 
         return output_path
 
     except PermissionError:
 
         print()
-        print("=" * 70)
-        print("WARNING: OUTPUT FILE IS LOCKED")
-        print("=" * 70)
+        print("WARNING: Output file is locked.")
+        print("Trying alternate filename...")
 
-        print(f"Locked file:")
-        print(f"  {output_path}")
-
-        print()
-        print(
-            "The file may be open in Excel, VS Code, "
-            "OneDrive, or another program."
+        new_path = output_path.with_name(
+            output_path.stem
+            + "_new.csv"
         )
 
-    # ------------------------------------------------------------
-    # Attempt 2: _new.csv
-    # ------------------------------------------------------------
+        try:
 
-    new_path = output_path.with_name(
-        output_path.stem + "_new.csv"
-    )
-
-    try:
-
-        df.to_csv(
-            new_path,
-            index=False,
-            encoding="utf-8-sig"
-        )
-
-        print()
-        print("Saved using alternate filename:")
-        print(f"  {new_path}")
-
-        return new_path
-
-    except PermissionError:
-        pass
-
-    # ------------------------------------------------------------
-    # Attempt 3: timestamped filename
-    # ------------------------------------------------------------
-
-    timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
-
-    timestamp_path = output_path.with_name(
-        f"{output_path.stem}_{timestamp}.csv"
-    )
-
-    try:
-
-        df.to_csv(
-            timestamp_path,
-            index=False,
-            encoding="utf-8-sig"
-        )
-
-        print()
-        print("Saved using timestamped filename:")
-        print(f"  {timestamp_path}")
-
-        return timestamp_path
-
-    except PermissionError as error:
-
-        print()
-        print("=" * 70)
-        print("ERROR: COULD NOT SAVE OUTPUT FILE")
-        print("=" * 70)
-
-        print(error)
-
-        return None
-
-
-# ================================================================
-# PRINT SAMPLE RESULTS
-# ================================================================
-
-def print_sample_results(df):
-    """
-    Print first 30 enriched rows.
-    """
-
-    print()
-    print("=" * 70)
-    print("SAMPLE RESULTS")
-    print("=" * 70)
-
-    columns = [
-        "Ranking URL",
-        "City",
-        "State",
-        "Country",
-        "Region",
-        "URL_Location",
-        "Category",
-    ]
-
-    available = [
-        column
-        for column in columns
-        if column in df.columns
-    ]
-
-    if not available:
-        print(df.head(30).to_string())
-        return
-
-    print(
-        df[available]
-        .head(30)
-        .to_string(index=False)
-    )
-
-
-# ================================================================
-# PRINT DISTRIBUTION
-# ================================================================
-
-def print_distribution(df):
-    """
-    Print City, State, Region and Category distributions.
-    """
-
-    # ------------------------------------------------------------
-    # CITY
-    # ------------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("CITY DISTRIBUTION")
-    print("=" * 70)
-
-    if "City" in df.columns:
-
-        print(
-            df["City"]
-            .value_counts(dropna=False)
-            .head(30)
-            .to_string()
-        )
-
-    # ------------------------------------------------------------
-    # STATE
-    # ------------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("STATE DISTRIBUTION")
-    print("=" * 70)
-
-    if "State" in df.columns:
-
-        print(
-            df["State"]
-            .value_counts(dropna=False)
-            .to_string()
-        )
-
-    # ------------------------------------------------------------
-    # REGION
-    # ------------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("REGION DISTRIBUTION")
-    print("=" * 70)
-
-    if "Region" in df.columns:
-
-        print(
-            df["Region"]
-            .value_counts(dropna=False)
-            .to_string()
-        )
-
-    # ------------------------------------------------------------
-    # CATEGORY
-    # ------------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("CATEGORY DISTRIBUTION")
-    print("=" * 70)
-
-    if "Category" in df.columns:
-
-        print(
-            df["Category"]
-            .value_counts(dropna=False)
-            .to_string()
-        )
-
-
-# ================================================================
-# PRINT UNKNOWN COUNTS
-# ================================================================
-
-def print_unknown_counts(df):
-    """
-    Print unknown values and city match rate.
-    """
-
-    print()
-    print("=" * 70)
-    print("UNKNOWN COUNTS")
-    print("=" * 70)
-
-    fields = [
-        "City",
-        "State",
-        "Country",
-        "Region",
-        "Category",
-    ]
-
-    for field in fields:
-
-        if field in df.columns:
-
-            unknown_count = (
-                df[field]
-                .fillna("Unknown")
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .eq("unknown")
-                .sum()
+            df.to_csv(
+                new_path,
+                index=False,
+                encoding="utf-8-sig"
             )
 
-            print(
-                f"{field}: {unknown_count}"
-            )
+            print()
+            print("Output saved as:")
+            print(new_path)
 
-    # ------------------------------------------------------------
-    # City match rate
-    # ------------------------------------------------------------
+            return new_path
 
-    if "City" in df.columns and len(df) > 0:
+        except Exception as error:
 
-        city_unknown = (
-            df["City"]
-            .fillna("Unknown")
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .eq("unknown")
-            .sum()
-        )
+            print()
+            print("ERROR saving file:")
+            print(error)
 
-        city_matched = len(df) - city_unknown
-
-        match_rate = (
-            city_matched / len(df)
-        ) * 100
-
-        print()
-        print(
-            f"City Match Rate: {match_rate:.2f}%"
-        )
+            return None
 
 
 # ================================================================
-# PROCESS ONE CSV FILE
+# PROCESS ONE CSV
 # ================================================================
 
-def process_file(file_name):
-    """
-    Process one CSV file.
-    """
-
-    input_path = RAW_FOLDER / file_name
-
-    # Output filename
-    output_name = (
-        input_path.stem +
-        "_enriched.csv"
-    )
-
-    output_path = OUTPUT_FOLDER / output_name
+def process_file(
+    file_path
+):
 
     print()
-    print("=" * 70)
-    print(f"PROCESSING: {file_name}")
-    print("=" * 70)
+    print("=" * 80)
+    print("PROCESSING:", file_path.name)
+    print("=" * 80)
 
     # ------------------------------------------------------------
-    # Read
+    # READ CSV
     # ------------------------------------------------------------
 
     try:
 
         df = read_csv_safely(
-            input_path
+            file_path
         )
 
     except Exception as error:
 
-        print()
-        print("ERROR: Could not read CSV.")
+        print("ERROR reading CSV:")
         print(error)
 
         return False
 
-    print(
-        f"Original Shape: {df.shape}"
-    )
+    print()
+    print("Original Shape:")
+    print(df.shape)
 
-    print(
-        f"Columns: {list(df.columns)}"
-    )
+    print()
+    print("Original Columns:")
+    print(list(df.columns))
 
     # ------------------------------------------------------------
-    # Detect URL column
+    # URL COLUMN
     # ------------------------------------------------------------
 
-    url_column = find_url_column(df)
+    url_column = find_url_column(
+        df
+    )
 
     if url_column is None:
 
         print()
-        print("ERROR: No URL column found.")
-
         print(
-            "Available columns:"
+            "ERROR: Ranking URL column not found."
         )
 
+        print()
+        print("Available columns:")
+
         for column in df.columns:
-            print(f"  - {column}")
+            print(" -", column)
 
         return False
 
-    print(
-        f"URL Column: {url_column}"
-    )
+    print()
+    print("URL Column:")
+    print(url_column)
 
     # ------------------------------------------------------------
-    # Extract location
+    # KEYWORD COLUMN
     # ------------------------------------------------------------
+
+    if "Keyword" not in df.columns:
+
+        print()
+        print(
+            "WARNING: Keyword column not found."
+        )
+
+        df["Keyword"] = ""
+
+    # ------------------------------------------------------------
+    # EXTRACT URL DATA
+    # ------------------------------------------------------------
+
+    results = []
+
+    total = len(
+        df
+    )
 
     print()
     print(
-        "Extracting City / State / Country / Region..."
+        "Extracting URL information..."
     )
 
-    location_results = []
+    for index, row in df.iterrows():
 
-    for index, url in enumerate(
-        df[url_column]
-    ):
+        url = row.get(
+            url_column,
+            ""
+        )
 
-        try:
+        keyword = row.get(
+            "Keyword",
+            ""
+        )
 
-            result = extract_location_data(
-                url
-            )
+        result = extract_location_data(
+            url,
+            keyword
+        )
 
-        except Exception:
-
-            result = {
-                "City": "Unknown",
-                "State": "Unknown",
-                "Country": "Unknown",
-                "Region": "Unknown",
-                "URL_Location": "Unknown",
-                "Category": "Unknown",
-            }
-
-        location_results.append(
+        results.append(
             result
         )
 
+        current = index + 1
+
+        if (
+            current % 500 == 0
+            or current == total
+        ):
+
+            print(
+                f"Processed "
+                f"{current:,}/{total:,}"
+            )
+
     # ------------------------------------------------------------
-    # Convert to DataFrame
+    # RESULT DATAFRAME
     # ------------------------------------------------------------
 
-    location_df = pd.DataFrame(
-        location_results
+    result_df = pd.DataFrame(
+        results
     )
 
     # ------------------------------------------------------------
-    # Add enrichment columns
+    # ADD COLUMNS
     # ------------------------------------------------------------
 
-    df["City"] = location_df["City"]
-    df["State"] = location_df["State"]
-    df["Country"] = location_df["Country"]
-    df["Region"] = location_df["Region"]
-    df["URL_Location"] = location_df[
+    df["City"] = result_df[
+        "City"
+    ]
+
+    df["State"] = result_df[
+        "State"
+    ]
+
+    df["Country"] = result_df[
+        "Country"
+    ]
+
+    df["Region"] = result_df[
+        "Region"
+    ]
+
+    df["URL_Location"] = result_df[
         "URL_Location"
     ]
 
-    print(
-        "Extracting categories..."
-    )
+    df["Area"] = result_df[
+        "Area"
+    ]
 
-    df["Category"] = location_df[
+    df["Category"] = result_df[
         "Category"
     ]
 
+    df["URL_Keyword"] = result_df[
+        "URL_Keyword"
+    ]
+
+    df["Unknown"] = result_df[
+        "Unknown"
+    ]
+
+    df["Remaining_Url_Keywords"] = result_df[
+        "Remaining_Url_Keywords"
+    ]
+
     # ------------------------------------------------------------
-    # Print results
+    # PRIORITY RANK = 1 FOR ALL
     # ------------------------------------------------------------
 
-    print_sample_results(df)
-
-    print_distribution(df)
-
-    print_unknown_counts(df)
+    df["Priority Rank"] = 1
 
     # ------------------------------------------------------------
-    # Save
+    # ARRANGE COLUMNS
     # ------------------------------------------------------------
 
-    saved_path = safe_save_csv(
+    df = arrange_columns(
+        df
+    )
+
+    # ------------------------------------------------------------
+    # EXTRACTION SUMMARY
+    # ------------------------------------------------------------
+
+    print()
+    print("=" * 80)
+    print("EXTRACTION SUMMARY")
+    print("=" * 80)
+
+    print()
+    print("CITY DISTRIBUTION:")
+
+    print(
+        df["City"]
+        .replace("", "Blank")
+        .value_counts()
+        .head(20)
+    )
+
+    print()
+    print("STATE DISTRIBUTION:")
+
+    print(
+        df["State"]
+        .replace("", "Blank")
+        .value_counts()
+        .head(20)
+    )
+
+    print()
+    print("REGION DISTRIBUTION:")
+
+    print(
+        df["Region"]
+        .replace("", "Blank")
+        .value_counts()
+    )
+
+    print()
+    print("CATEGORY DISTRIBUTION:")
+
+    print(
+        df["Category"]
+        .replace("", "Blank")
+        .value_counts()
+    )
+
+    # ------------------------------------------------------------
+    # MATCH RATES
+    # ------------------------------------------------------------
+
+    print()
+    print("=" * 80)
+    print("MATCH RATES")
+    print("=" * 80)
+
+    for column in [
+
+        "City",
+        "State",
+        "Country",
+        "Region",
+        "URL_Location",
+        "Area",
+        "Category",
+        "URL_Keyword",
+        "Remaining_Url_Keywords",
+
+    ]:
+
+        non_blank = (
+            df[column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .ne("")
+            .sum()
+        )
+
+        if len(df) > 0:
+
+            rate = (
+                non_blank
+                / len(df)
+            ) * 100
+
+        else:
+
+            rate = 0
+
+        print(
+            f"{column}: "
+            f"{non_blank:,}/{len(df):,} "
+            f"({rate:.2f}%)"
+        )
+
+    # ------------------------------------------------------------
+    # BLANK COUNTS
+    # ------------------------------------------------------------
+
+    print()
+    print("=" * 80)
+    print("BLANK COUNTS")
+    print("=" * 80)
+
+    for column in [
+
+        "City",
+        "State",
+        "Country",
+        "Region",
+        "URL_Location",
+        "Area",
+        "Category",
+        "URL_Keyword",
+        "Remaining_Url_Keywords",
+
+    ]:
+
+        blank_count = (
+            df[column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .eq("")
+            .sum()
+        )
+
+        print(
+            f"{column}: "
+            f"{blank_count:,}"
+        )
+
+    # ------------------------------------------------------------
+    # PRIORITY CHECK
+    # ------------------------------------------------------------
+
+    print()
+    print("PRIORITY RANK:")
+
+    print(
+        df["Priority Rank"]
+        .value_counts()
+        .sort_index()
+    )
+
+    # ------------------------------------------------------------
+    # OUTPUT FILE
+    # ------------------------------------------------------------
+
+    output_name = (
+        file_path.stem
+        + "_enriched_new.csv"
+    )
+
+    output_path = (
+        OUTPUT_FOLDER
+        / output_name
+    )
+
+    # ------------------------------------------------------------
+    # SAVE
+    # ------------------------------------------------------------
+
+    saved = save_csv(
         df,
         output_path
     )
 
-    if saved_path is None:
-
-        print()
-        print(
-            f"FAILED TO SAVE: {file_name}"
-        )
-
+    if saved is None:
         return False
 
+    # ------------------------------------------------------------
+    # FINAL SHAPE
+    # ------------------------------------------------------------
+
     print()
-    print(
-        f"Final Shape: {df.shape}"
-    )
+    print("Final Shape:")
+    print(df.shape)
+
+    print()
+    print("Final Columns:")
+
+    for index, column in enumerate(
+        df.columns,
+        start=1
+    ):
+
+        print(
+            f"{index}. {column}"
+        )
 
     return True
 
@@ -2346,26 +2024,28 @@ def process_file(file_name):
 # ================================================================
 
 def find_csv_files():
-    """
-    Find all CSV files in raw folder.
-    """
 
     if not RAW_FOLDER.exists():
 
         print()
         print("ERROR:")
         print(
-            f"Raw folder does not exist: {RAW_FOLDER}"
+            "Raw folder does not exist:"
+        )
+        print(
+            RAW_FOLDER
         )
 
         return []
 
     files = sorted(
         [
-            file.name
+            file
             for file in RAW_FOLDER.iterdir()
-            if file.is_file()
-            and file.suffix.lower() == ".csv"
+            if (
+                file.is_file()
+                and file.suffix.lower() == ".csv"
+            )
         ]
     )
 
@@ -2379,63 +2059,84 @@ def find_csv_files():
 def main():
 
     print()
-    print("=" * 70)
-    print("URL LOCATION & CATEGORY EXTRACTION SYSTEM")
-    print("=" * 70)
+    print("=" * 80)
+    print(
+        "URL LOCATION & CATEGORY EXTRACTION SYSTEM"
+    )
+    print("=" * 80)
 
     print()
+    print("Raw Folder:")
     print(
-        f"Raw Folder: {RAW_FOLDER}"
+        RAW_FOLDER
     )
 
+    print()
+    print("Output Folder:")
     print(
-        f"Output Folder: {OUTPUT_FOLDER}"
+        OUTPUT_FOLDER
     )
 
     # ------------------------------------------------------------
-    # Find files
+    # FIND CSV FILES
     # ------------------------------------------------------------
 
     csv_files = find_csv_files()
 
     print()
     print(
-        f"CSV files found: {len(csv_files)}"
+        f"CSV files found: "
+        f"{len(csv_files)}"
     )
 
     if not csv_files:
 
         print()
         print(
-            "No CSV files found in raw folder."
+            "No CSV files found."
+        )
+
+        print()
+        print(
+            "Put your CSV files inside:"
+        )
+
+        print(
+            RAW_FOLDER
         )
 
         return
 
-    for file_name in csv_files:
+    print()
+
+    for file in csv_files:
 
         print(
-            f" - {file_name}"
+            " -",
+            file.name
         )
 
     # ------------------------------------------------------------
-    # Process files
+    # PROCESS FILES
     # ------------------------------------------------------------
 
     successful = 0
     failed = 0
 
-    for file_name in csv_files:
+    for file_path in csv_files:
 
         try:
 
-            result = process_file(
-                file_name
+            success = process_file(
+                file_path
             )
 
-            if result:
+            if success:
+
                 successful += 1
+
             else:
+
                 failed += 1
 
         except Exception as error:
@@ -2443,36 +2144,25 @@ def main():
             failed += 1
 
             print()
-            print("=" * 70)
             print(
-                f"ERROR PROCESSING: {file_name}"
+                "ERROR processing:",
+                file_path.name
             )
-            print("=" * 70)
 
             print(
-                f"{type(error).__name__}: {error}"
+                type(error).__name__,
+                ":",
+                error
             )
 
     # ------------------------------------------------------------
-    # Final summary
+    # FINAL REPORT
     # ------------------------------------------------------------
 
     print()
-    print("=" * 70)
-
-    if failed == 0:
-
-        print(
-            "ALL CSV FILES PROCESSED SUCCESSFULLY"
-        )
-
-    else:
-
-        print(
-            "PROCESSING COMPLETED WITH SOME ERRORS"
-        )
-
-    print("=" * 70)
+    print("=" * 80)
+    print("FINAL REPORT")
+    print("=" * 80)
 
     print()
     print(
@@ -2480,19 +2170,13 @@ def main():
     )
 
     print(
-        f"Failed:     {failed}"
+        f"Failed: {failed}"
     )
 
     print()
     print(
-        f"Output folder:"
+        "Completed."
     )
-
-    print(
-        f"  {OUTPUT_FOLDER}"
-    )
-
-    print()
 
 
 # ================================================================
