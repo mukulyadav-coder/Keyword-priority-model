@@ -111,3 +111,11 @@ Keyword-Priority-Model/
 ├── .gitignore
 └── README.md
 ```
+#🚀 Setup & Execution
+git clone https://github.com/mukulyadav-coder/Keyword-priority-model.git
+cd Keyword-Priority-Model
+pip install -r backend/requirements.txt
+python backend/url_extraction.py
+python backend/train_model.py
+python backend/predict.py
+python backend/evaluate_model.py
