@@ -1287,6 +1287,95 @@ def extract_url_keywords(
 
 
 # ================================================================
+# BUSINESS CATEGORY / PRODUCT CATEGORY / SOURCE
+# ================================================================
+
+BUSINESS_CATEGORY_MAP = {
+    "Restaurant": "Food & Dining",
+    "Hotel": "Accommodation",
+    "Attraction": "Tourism & Attractions",
+    "Tourism": "Travel & Tourism",
+}
+
+PRODUCT_CATEGORY_URL_WORDS = {
+    "Food & Dining": [
+        "restaurant", "restaurants", "food", "cafe", "cafes",
+        "dining", "eatery", "eateries", "bar", "bars"
+    ],
+    "Accommodation": [
+        "hotel", "hotels", "resort", "resorts", "stay",
+        "stays", "lodging", "accommodation"
+    ],
+    "Tourism": [
+        "tourism", "travel", "trip", "trips", "tour", "tours",
+        "vacation", "vacations"
+    ],
+    "Attractions": [
+        "attraction", "attractions", "activities", "things_to_do",
+        "thingstodo", "places_to_visit", "places-to-visit",
+        "sightseeing", "landmarks"
+    ],
+}
+
+
+def extract_business_category(category):
+    """Map the existing URL Category to a broader business category."""
+    return BUSINESS_CATEGORY_MAP.get(category, "")
+
+
+def extract_product_category(url, keyword="", category=""):
+    """Extract a product/service category from URL and source keyword."""
+    text = get_search_text(url)
+
+    if not text:
+        text = normalize_text(keyword)
+
+    # Check the existing URL category first.
+    category_mapping = {
+        "Restaurant": "Food & Dining",
+        "Hotel": "Accommodation",
+        "Attraction": "Attractions",
+        "Tourism": "Tourism",
+    }
+
+    if category in category_mapping:
+        return category_mapping[category]
+
+    # Fall back to URL/source-keyword words.
+    for product_category, patterns in PRODUCT_CATEGORY_URL_WORDS.items():
+        for pattern in patterns:
+            if re.search(
+                r"\b" + re.escape(normalize_text(pattern)) + r"\b",
+                text,
+                flags=re.IGNORECASE
+            ):
+                return product_category
+
+    return ""
+
+
+def extract_source(url):
+    """Extract the source website/domain from the Ranking URL."""
+    clean_url = normalize_url(url)
+
+    if not clean_url:
+        return ""
+
+    try:
+        parsed = urlparse(clean_url)
+        domain = parsed.netloc.lower().strip()
+
+        # Remove www. from the source name.
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+
+    except Exception:
+        return ""
+
+
+# ================================================================
 # COMPLETE URL EXTRACTION
 # ================================================================
 
@@ -1311,6 +1400,9 @@ def extract_location_data(
             "URL_Location": "",
             "Area": "",
             "Category": "",
+            "Business Category": "",
+            "Product Category": "",
+            "Source": "",
             "URL_Keyword": "",
             "Unknown": "",
             "Remaining_Url_Keywords": "",
@@ -1378,6 +1470,32 @@ def extract_location_data(
     )
 
     # ------------------------------------------------------------
+    # Business Category
+    # ------------------------------------------------------------
+
+    business_category = extract_business_category(
+        category
+    )
+
+    # ------------------------------------------------------------
+    # Product Category
+    # ------------------------------------------------------------
+
+    product_category = extract_product_category(
+        clean_url,
+        keyword,
+        category
+    )
+
+    # ------------------------------------------------------------
+    # Source
+    # ------------------------------------------------------------
+
+    source = extract_source(
+        clean_url
+    )
+
+    # ------------------------------------------------------------
     # URL Keyword
     # ------------------------------------------------------------
 
@@ -1411,6 +1529,12 @@ def extract_location_data(
         "Area": area,
 
         "Category": category,
+
+        "Business Category": business_category,
+
+        "Product Category": product_category,
+
+        "Source": source,
 
         "URL_Keyword": url_keyword,
 
@@ -1531,6 +1655,9 @@ def arrange_columns(df):
         "URL_Location",
         "Area",
         "Category",
+        "Business Category",
+        "Product Category",
+        "Source",
 
         "URL_Keyword",
         "Unknown",
@@ -1796,6 +1923,18 @@ def process_file(
 
     df["Category"] = result_df[
         "Category"
+    ]
+
+    df["Business Category"] = result_df[
+        "Business Category"
+    ]
+
+    df["Product Category"] = result_df[
+        "Product Category"
+    ]
+
+    df["Source"] = result_df[
+        "Source"
     ]
 
     df["URL_Keyword"] = result_df[
