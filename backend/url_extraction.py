@@ -41,7 +41,6 @@
 #   7. Priority Rank is always 1.
 #
 # ================================================================
-
 import re
 import html
 from pathlib import Path
