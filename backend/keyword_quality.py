@@ -1,7 +1,5 @@
 import re
 import pandas as pd
-
-
 def calculate_keyword_quality(keyword):
 
     if pd.isna(keyword):
