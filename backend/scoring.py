@@ -1,5 +1,4 @@
 def calculate_priority_score(df):
-
     # ==========================================
     # Calculate Final Priority Score
     # ==========================================
