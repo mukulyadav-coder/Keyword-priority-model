@@ -1,7 +1,6 @@
 import pandas as pd
 from keyword_quality import add_keyword_quality
 
-
 def prepare_features(df):
 
     # ==========================================
